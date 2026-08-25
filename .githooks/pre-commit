@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Refuses to commit staged content that references a beads issue id (psp-xxx).
+#
+# Beads is internal to this project's workflow -- a bead id in a comment or
+# doc means nothing to a reader without bd access and rots the moment that
+# bead is closed/renumbered. Describe the change and its rationale directly
+# instead of pointing at the tracker.
+#
+# Checks the STAGED blob content (git show :path), not the working tree file,
+# so this can't be bypassed by fixing a file without re-staging it.
+set -euo pipefail
+
+PATTERN='\bpsp-[a-z0-9]{3,4}(\.[0-9]+)*\b'
+report=""
+
+while IFS= read -r -d '' file; do
+  case "$file" in
+    .beads/*|.githooks/*) continue ;;
+  esac
+
+  # -I skips files grep considers binary; -n prints line numbers.
+  matches="$(git show ":$file" 2>/dev/null | grep -nEI "$PATTERN" || true)"
+  [ -z "$matches" ] && continue
+
+  while IFS= read -r line; do
+    report+="  $file:$line"$'\n'
+  done <<< "$matches"
+done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+
+if [ -n "$report" ]; then
+  echo "Bead id(s) found in staged content:" >&2
+  printf '%s' "$report" >&2
+  echo "Describe the change/rationale itself instead of pointing at the bead." >&2
+  exit 1
+fi
+
+exit 0

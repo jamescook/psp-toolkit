@@ -93,7 +93,6 @@ test/
   fixtures/test.iso     — Shared synthetic ISO fixture (64KB)
 scripts/
   generate-e2e-fixture.js   — Generates test/fixtures/test.iso
-  compare-eboots.cjs        — Diagnostic: compare EBOOTs structurally
 tools/
   inspect-eboot.js      — EBOOT structural inspector
 ```

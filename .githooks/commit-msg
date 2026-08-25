@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Refuses a commit message that references a beads issue id (psp-xxx) --
+# same rationale as the pre-commit hook's check on staged content.
+set -euo pipefail
+
+MSG_FILE="$1"
+PATTERN='\bpsp-[a-z0-9]{3,4}(\.[0-9]+)*\b'
+
+# Strip comment lines (git strips these before the final message anyway).
+matches="$(grep -vE '^\s*#' "$MSG_FILE" | grep -nE "$PATTERN" || true)"
+
+if [ -n "$matches" ]; then
+  echo "Bead id(s) found in commit message:" >&2
+  echo "$matches" | sed 's/^/  line /' >&2
+  echo "Describe the change/rationale itself instead of pointing at the bead." >&2
+  exit 1
+fi
+
+exit 0
