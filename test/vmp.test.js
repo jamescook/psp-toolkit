@@ -1,0 +1,97 @@
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  generateHash, buildVmp,
+  VMP_HEADER_BYTES, MCR_OFFSET, VMP_SEED_OFFSET, VMP_HASH_OFFSET, VMP_SIZE,
+  MCR_SIZE,
+} from './helpers.js';
+
+const hex = (b) => Array.from(b).map((x) => x.toString(16).padStart(2, '0')).join('');
+
+// Golden vectors captured from apollo-psp's actual generateHash() (vmp_resign.c),
+// compiled and run against mbedtls locally -- ground truth for this signing scheme,
+// independent of any specific save file. A separate, reusable oracle script
+// (parameterized, not tied to this machine) re-derives vectors like these
+// against real hardware saves for end-to-end verification.
+describe('generateHash — golden vectors from the apollo-psp C reference', () => {
+  it('64-byte sequential input (0..63)', async () => {
+    const input = new Uint8Array(64);
+    for (let i = 0; i < 64; i++) input[i] = i;
+    const hash = await generateHash(input, new Uint8Array(20), 64);
+    assert.equal(hex(hash), '69c8c82eea974e89fa699c56958fc4fb5c99098c');
+  });
+
+  it('overwrites the seed buffer with the fixed seed string as a side effect', async () => {
+    const input = new Uint8Array(64);
+    const seed = new Uint8Array(20);
+    await generateHash(input, seed, 64);
+    assert.equal(hex(seed), '7777772e627563616e65726f2e636f6d2e617200');
+  });
+
+  it('a full VMP_SIZE all-zero buffer', async () => {
+    const input = new Uint8Array(131200);
+    const hash = await generateHash(input, new Uint8Array(20), 131200);
+    assert.equal(hex(hash), 'a00703d51f4b06e064d62e139fda8194bf911d46');
+  });
+
+  it('a full VMP_SIZE all-0xFF buffer', async () => {
+    const input = new Uint8Array(131200).fill(0xff);
+    const hash = await generateHash(input, new Uint8Array(20), 131200);
+    assert.equal(hex(hash), '5acc36b4b3dbd609995a67794da283ebfc290f56');
+  });
+
+  it('a full VMP_SIZE patterned buffer', async () => {
+    const input = new Uint8Array(131200);
+    for (let i = 0; i < input.length; i++) input[i] = (i * 7 + 3) & 0xff;
+    const hash = await generateHash(input, new Uint8Array(20), 131200);
+    assert.equal(hex(hash), '51750de163acb59e6b1622ec4f90c4be367af018');
+  });
+
+  it('a single-byte input', async () => {
+    const hash = await generateHash(new Uint8Array([0x42]), new Uint8Array(20), 1);
+    assert.equal(hex(hash), 'dc883e9a642634ba47d3c7ff55bd71f7fb95b585');
+  });
+});
+
+describe('buildVmp', () => {
+  it('throws on wrong-length input', async () => {
+    await assert.rejects(() => buildVmp(new Uint8Array(100)), /131072/);
+  });
+
+  it('produces exactly VMP_SIZE bytes', async () => {
+    const vmp = await buildVmp(new Uint8Array(MCR_SIZE));
+    assert.equal(vmp.length, VMP_SIZE);
+  });
+
+  it('writes the VMP magic + header-length marker at offset 0', async () => {
+    const vmp = await buildVmp(new Uint8Array(MCR_SIZE));
+    assert.equal(hex(vmp.subarray(0, VMP_HEADER_BYTES.length)), hex(VMP_HEADER_BYTES));
+  });
+
+  it('copies the memory card verbatim at MCR_OFFSET', async () => {
+    const mcr = new Uint8Array(MCR_SIZE);
+    for (let i = 0; i < mcr.length; i++) mcr[i] = (i * 13 + 1) & 0xff;
+    const vmp = await buildVmp(mcr);
+    assert.equal(hex(vmp.subarray(MCR_OFFSET, MCR_OFFSET + MCR_SIZE)), hex(mcr));
+  });
+
+  it('writes the fixed seed string at VMP_SEED_OFFSET', async () => {
+    const vmp = await buildVmp(new Uint8Array(MCR_SIZE));
+    assert.equal(hex(vmp.subarray(VMP_SEED_OFFSET, VMP_SEED_OFFSET + 20)), '7777772e627563616e65726f2e636f6d2e617200');
+  });
+
+  it("the written signature is what generateHash independently produces for the same output", async () => {
+    const vmp = await buildVmp(new Uint8Array(MCR_SIZE));
+    const writtenSignature = vmp.subarray(VMP_HASH_OFFSET, VMP_HASH_OFFSET + 20);
+
+    // Recompute independently on a copy with the hash field re-zeroed, exactly
+    // as buildVmp itself did before signing -- this is the actual correctness
+    // property (self-consistent signing), not a re-derivation of the algorithm.
+    const recomputeInput = vmp.slice();
+    recomputeInput.fill(0, VMP_HASH_OFFSET, VMP_HASH_OFFSET + 20);
+    const seed = recomputeInput.subarray(VMP_SEED_OFFSET, VMP_SEED_OFFSET + 20);
+    const recomputed = await generateHash(recomputeInput, seed, VMP_SIZE);
+
+    assert.equal(hex(writtenSignature), hex(recomputed));
+  });
+});
