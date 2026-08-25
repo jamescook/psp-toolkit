@@ -46,3 +46,4 @@ export { buildPstitleimg, buildPsar } from '../eboot/pstitleimg.js';
 export { buildEboot } from '../eboot/assembler.js';
 export { verifyEboot } from '../eboot/verify.js';
 export { parseMcr, MCR_SIZE, BLOCK_SIZE, HEADER_SIZE, MAX_SLOTS } from '../save/mcr.js';
+export { stripGmeHeader, GME_HEADER_SIZE, GME_SIZE, GME_MAGIC } from '../save/gme.js';
