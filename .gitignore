@@ -1,5 +1,4 @@
 .DS_Store
-.beads/
 dist/
 node_modules/
 vendor/zlib.browser.js
