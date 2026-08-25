@@ -42,7 +42,10 @@ const STARTDAT_CONST = 0x2D31;         // p2 = p1 + this constant
 const HEADER_HASH_U32 = [0x2CC9C5BC, 0x33B5A90F, 0x06F6B4B3, 0xB25945BA];
 
 // Fixed disc size table at +0x214 (byte-identical in Sony FF7 and FF8 EBOOTs).
-// Likely references internal POPS structures; does not vary with actual disc sizes.
+// Confirmed unvalidated by POPS: PSXPackager (github.com/RupertAvery/PSXPackager,
+// MultiDiscPbpWriter.cs) fills this same 80-byte span with WriteRandom() — genuine
+// random data on every build — and its output plays fine on real hardware regardless
+// of disc count. Safe to keep fixed here; no per-disc-count reference dump needed.
 // prettier-ignore
 const DISC_SIZE_TABLE = new Uint8Array([
   0x29,0x00,0x00,0x00, 0x23,0x48,0x00,0x00, 0xbe,0x18,0x00,0x00, 0x84,0x67,0x00,0x00,
@@ -52,8 +55,9 @@ const DISC_SIZE_TABLE = new Uint8Array([
   0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
 ]);
 
-// Fixed data3/crypto template at +0x28C (byte-identical in Sony FF7 and FF8 EBOOTs).
-// Likely DRM-related key material — ignored by CFW but must be present.
+// Fixed data3/crypto template at +0x28C (byte-identical in Sony FF7 and FF8 EBOOTs,
+// and in PSXPackager's `Popstation.data3` — cross-confirmed, not title/disc-count
+// specific). Likely DRM-related key material — ignored by CFW but must be present.
 // prettier-ignore
 const DATA3_CRYPTO = new Uint8Array([
   0x8c,0x0e,0xae,0x9d,0x39,0x8c,0xfe,0x24,0x65,0x21,0xad,0x2d,0x65,0xa9,0x61,0xdf,
