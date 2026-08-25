@@ -45,3 +45,4 @@ export { compressBlocks, buildPsisoimg } from '../eboot/psisoimg.js';
 export { buildPstitleimg, buildPsar } from '../eboot/pstitleimg.js';
 export { buildEboot } from '../eboot/assembler.js';
 export { verifyEboot } from '../eboot/verify.js';
+export { parseMcr, MCR_SIZE, BLOCK_SIZE, HEADER_SIZE, MAX_SLOTS } from '../save/mcr.js';
