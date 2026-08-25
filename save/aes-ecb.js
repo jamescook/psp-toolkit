@@ -94,22 +94,45 @@ function invSubBytes(state) {
   for (let i = 0; i < 16; i++) state[i] = INV_SBOX[state[i]];
 }
 
-// State is column-major: state[c*4+r] is row r, column c.
+// State is column-major: state[c*4+r] is row r, column c. Each row's 4 bytes
+// live at indices {r, 4+r, 8+r, 12+r}. ShiftRows left-rotates row r by r
+// positions; it's a fixed, data-independent permutation, so it's done here
+// with a handful of scalar swaps instead of allocating a 16-byte copy.
 function shiftRows(state) {
-  const s = state.slice();
-  for (let r = 1; r < 4; r++) {
-    for (let c = 0; c < 4; c++) {
-      state[c * 4 + r] = s[((c + r) % 4) * 4 + r];
-    }
-  }
+  let t;
+  // Row 1: left-rotate by 1.
+  t = state[1];
+  state[1] = state[5];
+  state[5] = state[9];
+  state[9] = state[13];
+  state[13] = t;
+  // Row 2: left-rotate by 2 (pairwise swap).
+  t = state[2]; state[2] = state[10]; state[10] = t;
+  t = state[6]; state[6] = state[14]; state[14] = t;
+  // Row 3: left-rotate by 3 (= right-rotate by 1).
+  t = state[15];
+  state[15] = state[11];
+  state[11] = state[7];
+  state[7] = state[3];
+  state[3] = t;
 }
 function invShiftRows(state) {
-  const s = state.slice();
-  for (let r = 1; r < 4; r++) {
-    for (let c = 0; c < 4; c++) {
-      state[c * 4 + r] = s[((c - r + 4) % 4) * 4 + r];
-    }
-  }
+  let t;
+  // Row 1: right-rotate by 1 (undoes shiftRows' left-rotate-by-1).
+  t = state[13];
+  state[13] = state[9];
+  state[9] = state[5];
+  state[5] = state[1];
+  state[1] = t;
+  // Row 2: rotate-by-2 is its own inverse.
+  t = state[2]; state[2] = state[10]; state[10] = t;
+  t = state[6]; state[6] = state[14]; state[14] = t;
+  // Row 3: left-rotate by 1 (undoes shiftRows' right-rotate-by-1).
+  t = state[3];
+  state[3] = state[7];
+  state[7] = state[11];
+  state[11] = state[15];
+  state[15] = t;
 }
 
 function mixColumns(state) {
