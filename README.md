@@ -1,5 +1,7 @@
 # PSP Toolkit
 
+**[jamescook.github.io/psp-toolkit](https://jamescook.github.io/psp-toolkit/)** — use it online, no download needed. Auto-deployed from `main` on every push, so it's always the latest build.
+
 Browser-based tool for converting PSP and PS1 disc images. Everything runs
 client-side — no server, no uploads, your files never leave your machine.
 
@@ -25,7 +27,9 @@ Drop a PS1 disc image (.bin/.iso, with or without .cue) and build a PSP-compatib
 
 ## Usage
 
-Download `index.html` from the [latest release](../../releases/latest) and open it in your browser. That's it — single file, no install, no server.
+Just open **[jamescook.github.io/psp-toolkit](https://jamescook.github.io/psp-toolkit/)**.
+
+For an offline copy, download `index.html` from the [latest release](../../releases/latest) instead — single file, no install, no server.
 
 ### Building from source
 
