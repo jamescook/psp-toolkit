@@ -5,6 +5,7 @@
 //
 // Usage:
 //   node scripts/verify-vmp-oracle.cjs --oracle <path-to-apollo-psp-checkout> --gme <path-to-.gme-file>
+//   node scripts/verify-vmp-oracle.cjs --oracle <path-to-apollo-psp-checkout> --mcr <path-to-raw-128KB-.mcr-file>
 //
 // Requires a C compiler and mbedtls (aes.h/sha1.h) on this machine -- e.g.
 // `brew install mbedtls` on macOS, `apt install libmbedtls-dev` on Debian/
@@ -27,16 +28,18 @@ const { execFileSync } = require('child_process');
 function usageAndExit(message) {
   if (message) console.error(`error: ${message}\n`);
   console.error(
-    'usage: node scripts/verify-vmp-oracle.cjs --oracle <path-to-apollo-psp-checkout> --gme <path-to-.gme-file>'
+    'usage: node scripts/verify-vmp-oracle.cjs --oracle <path-to-apollo-psp-checkout> --gme <path-to-.gme-file>\n' +
+    '       node scripts/verify-vmp-oracle.cjs --oracle <path-to-apollo-psp-checkout> --mcr <path-to-raw-128KB-.mcr-file>'
   );
   process.exit(1);
 }
 
 function parseArgs(argv) {
-  const args = { oracle: null, gme: null };
+  const args = { oracle: null, gme: null, mcr: null };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--oracle') args.oracle = argv[++i];
     else if (argv[i] === '--gme') args.gme = argv[++i];
+    else if (argv[i] === '--mcr') args.mcr = argv[++i];
   }
   return args;
 }
@@ -129,25 +132,30 @@ function compileHarness(oracleDir, cc, mbedtlsFlags) {
 }
 
 async function main() {
-  const { oracle, gme } = parseArgs(process.argv.slice(2));
+  const { oracle, gme, mcr: mcrPath } = parseArgs(process.argv.slice(2));
   if (!oracle) usageAndExit('--oracle <path-to-apollo-psp-checkout> is required');
-  if (!gme) usageAndExit('--gme <path-to-.gme-file> is required');
+  if (!gme && !mcrPath) usageAndExit('one of --gme <path> or --mcr <path> is required');
+  if (gme && mcrPath) usageAndExit('pass only one of --gme or --mcr, not both');
 
   if (!fs.existsSync(oracle) || !fs.statSync(oracle).isDirectory()) {
     usageAndExit(`--oracle path is not a directory: ${oracle}`);
   }
-  requireFile(gme, '--gme file');
+  requireFile(gme || mcrPath, gme ? '--gme file' : '--mcr file');
 
   const cc = detectCompiler();
   const mbedtlsFlags = detectMbedtlsFlags(cc);
   const harnessBin = compileHarness(path.resolve(oracle), cc, mbedtlsFlags);
 
   const saveDir = path.join(__dirname, '..', 'save');
-  const { stripGmeHeader } = await import(path.join(saveDir, 'gme.js'));
   const { buildVmp } = await import(path.join(saveDir, 'vmp.js'));
 
-  const gmeBytes = new Uint8Array(fs.readFileSync(gme));
-  const mcr = stripGmeHeader(gmeBytes);
+  let mcr;
+  if (gme) {
+    const { stripGmeHeader } = await import(path.join(saveDir, 'gme.js'));
+    mcr = stripGmeHeader(new Uint8Array(fs.readFileSync(gme)));
+  } else {
+    mcr = new Uint8Array(fs.readFileSync(mcrPath));
+  }
   const ourVmp = await buildVmp(mcr);
 
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vmp-oracle-run-'));
@@ -178,7 +186,7 @@ async function main() {
 
   if (firstDiff === -1) {
     console.log(`PASS: our buildVmp() output matches the real vmp_resign.c oracle byte-for-byte (${ourVmp.length} bytes).`);
-    console.log(`  input: ${gme}`);
+    console.log(`  input: ${gme || mcrPath}`);
     console.log(`  oracle: ${oracle}`);
     process.exit(0);
   }
