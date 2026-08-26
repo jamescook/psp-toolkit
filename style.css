@@ -691,6 +691,19 @@ input[type="file"] { display: none; }
 /* Save Manager tab */
 .format-gme { background: #274a5a; color: #64c8df; }
 .format-mcr { background: #3a5a27; color: #a8df64; }
+.format-vmp { background: #4a2a5a; color: #b478e8; }
+
+.save-export-format {
+  margin-top: 0.8rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+}
+.save-export-format-label {
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+}
 
 .save-slot-controls {
   margin-top: 0.8rem;

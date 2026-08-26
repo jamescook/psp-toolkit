@@ -236,9 +236,9 @@
       <div class="tab-panel" id="panel-save">
         <div class="drop-zone" id="saveDropZone" data-testid="save-drop-zone">
           <span class="icon">&#128179;</span>
-          <p>Drop a PS1 save card here<br><small>.gme (DexDrive) or raw .mcr</small></p>
+          <p>Drop a PS1 save card here<br><small>.gme (DexDrive), raw .mcr, or .vmp (PSP/Vita)</small></p>
         </div>
-        <input type="file" id="saveFileInput" data-testid="save-file-input" accept=".gme,.mcr,.mcd">
+        <input type="file" id="saveFileInput" data-testid="save-file-input" accept=".gme,.mcr,.mcd,.vmp">
 
         <div class="file-info" id="saveFileInfo">
           <div class="name" id="saveFileName"></div>
@@ -250,6 +250,12 @@
           <span class="save-slot-count" id="saveSlotCount"></span>
         </div>
         <div class="save-slot-list" id="saveSlotList" data-testid="save-slot-list"></div>
+
+        <div class="save-export-format" id="saveExportFormat" data-testid="save-export-format" style="display:none">
+          <span class="save-export-format-label">Export as</span>
+          <label class="checkbox-row"><input type="radio" name="saveExportFormat" value="mcr" checked> MCR (raw)</label>
+          <label class="checkbox-row"><input type="radio" name="saveExportFormat" value="gme"> GME (DexDrive)</label>
+        </div>
 
         <div class="actions save-actions" id="saveActions" data-testid="save-actions">
           <button class="btn-save" id="saveExtractBtn" data-testid="save-extract-btn" disabled>Extract to VMP</button>

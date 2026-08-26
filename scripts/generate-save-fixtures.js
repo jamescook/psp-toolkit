@@ -1,10 +1,13 @@
 #!/usr/bin/env node
-// Generate the synthetic .gme fixture used by test/e2e/save-manager.spec.js.
+// Generate the synthetic .gme and .vmp fixtures used by
+// test/e2e/save-manager.spec.js.
 //
 // A deterministic, safe-to-commit memory card with two real saves (no real
 // game/hardware data): one single-block save and one two-block chain, each
 // with a distinct, recognizable product code so the E2E spec can assert on
-// filenames and slot content without depending on a real .gme file.
+// filenames and slot content without depending on a real .gme/.vmp file.
+// Both fixtures wrap the exact same card, so either input should list the
+// same two saves.
 
 import fs from 'fs';
 import path from 'path';
@@ -16,6 +19,7 @@ const FIXTURES = path.join(ROOT, 'test', 'fixtures');
 async function main() {
   const { MCR_SIZE, HEADER_SIZE, BLOCK_SIZE } = await import(path.join(ROOT, 'save', 'mcr.js'));
   const { GME_HEADER_SIZE, GME_MAGIC } = await import(path.join(ROOT, 'save', 'gme.js'));
+  const { buildVmp } = await import(path.join(ROOT, 'save', 'vmp.js'));
 
   const mcr = new Uint8Array(MCR_SIZE);
   mcr[0] = 0x4d; mcr[1] = 0x43; // "MC" card ID signature (frame 0, not a save slot)
@@ -57,10 +61,15 @@ async function main() {
   for (let i = 0; i < GME_MAGIC.length; i++) gme[i] = GME_MAGIC.charCodeAt(i);
   gme.set(mcr, GME_HEADER_SIZE);
 
+  const vmp = await buildVmp(mcr);
+
   fs.mkdirSync(FIXTURES, { recursive: true });
-  const outPath = path.join(FIXTURES, 'save-test.gme');
-  fs.writeFileSync(outPath, Buffer.from(gme));
-  console.log(`Wrote ${outPath} (${gme.length} bytes)`);
+  const gmePath = path.join(FIXTURES, 'save-test.gme');
+  const vmpPath = path.join(FIXTURES, 'save-test.vmp');
+  fs.writeFileSync(gmePath, Buffer.from(gme));
+  fs.writeFileSync(vmpPath, Buffer.from(vmp));
+  console.log(`Wrote ${gmePath} (${gme.length} bytes)`);
+  console.log(`Wrote ${vmpPath} (${vmp.length} bytes)`);
 }
 
 main();

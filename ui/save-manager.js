@@ -1,13 +1,16 @@
 // ══════════════════════════════════════════════════════════════════════════════
-// SAVE MANAGER TAB — list PS1 saves on a GME/MCR memory card, extract to VMP
+// SAVE MANAGER TAB — list PS1 saves on a GME/MCR/VMP card, convert between formats
 //
-// Listing (parsing the card's directory) runs on the main thread -- it's a
-// cheap synchronous read, matching this project's "no worker for read-only
+// Two directions, one UI: drop a GME or raw MCR (a PC-emulator card) and
+// extract saves to VMP (for PSP/Vita); drop a VMP (a PSP/Vita card) and
+// export saves as raw MCR or GME (for a PC emulator). Either way, listing
+// (parsing the card's directory) runs on the main thread -- it's a cheap
+// synchronous read, matching this project's "no worker for read-only
 // inspection" convention (see diagnose.js). It duplicates save/gme.js's
 // stripGmeHeader() and save/mcr.js's parseMcr() locally rather than importing
 // them, because ui/*.js files are plain concatenated scripts, not ES modules
 // (see ui/shared.js's autoDetectDiscId for the same tradeoff, spelled out
-// there). Extraction (isolating a save + signing the VMP) runs in
+// there). Packaging (isolating a save + signing/wrapping it) runs in
 // save-worker.js, one worker per selected slot, following the same
 // off-main-thread pattern as convert/eboot/patch even though a single 128KB
 // card is fast enough not to strictly need it.
@@ -22,6 +25,7 @@ const saveSlotControls = document.getElementById('saveSlotControls');
 const saveSelectAllBtn = document.getElementById('saveSelectAllBtn');
 const saveSlotCount = document.getElementById('saveSlotCount');
 const saveSlotList = document.getElementById('saveSlotList');
+const saveExportFormat = document.getElementById('saveExportFormat');
 const saveExtractBtn = document.getElementById('saveExtractBtn');
 const saveProgressArea = document.getElementById('saveProgressArea');
 const saveProgressFill = document.getElementById('saveProgressFill');
@@ -30,9 +34,10 @@ const saveProgressPct = document.getElementById('saveProgressPct');
 const saveStatus = document.getElementById('saveStatus');
 const saveInfoBox = document.getElementById('saveInfoBox');
 
-let currentMcr = null;   // Uint8Array — the current card, GME header already stripped
+let currentMcr = null;   // Uint8Array — the current card, container header already stripped
 let currentSlots = [];   // parsed 'initial' slots (one row per real save)
 let currentSourceName = '';
+let currentMode = 'vmp'; // 'vmp' (GME/MCR in -> VMP out) or 'export' (VMP in -> MCR/GME out)
 
 // ── Duplicated read-only logic (see file header for why) ────────────────────
 
@@ -41,6 +46,8 @@ const SAVE_HEADER_SIZE = 128;
 const SAVE_MAX_SLOTS = 15;
 const SAVE_GME_HEADER_SIZE = 3904;
 const SAVE_GME_MAGIC = '123-456-STD';
+const SAVE_VMP_SIZE = 0x20080;
+const SAVE_VMP_MCR_OFFSET = 0x80;
 
 const SAVE_BLOCK_TYPES = {
   0xa0: 'formatted',
@@ -62,16 +69,27 @@ function saveAsciiSlice(buf, start, len) {
   return s;
 }
 
-/** Strip a GME (DexDrive) container down to its raw 128KB memory card, or
- *  return the input as-is if it's already a bare 128KB card. */
-function stripToRawMcr(data) {
-  if (data.length === SAVE_MCR_SIZE) return data;
+/** Identify a dropped file as 'gme', 'mcr', or 'vmp' by size + magic. */
+function detectInputKind(data) {
+  if (data.length === SAVE_MCR_SIZE) return 'mcr';
+
+  if (data.length === SAVE_VMP_SIZE && data[1] === 0x50 && data[2] === 0x4d && data[3] === 0x56) {
+    return 'vmp';
+  }
 
   const magic = String.fromCharCode(...data.subarray(0, SAVE_GME_MAGIC.length));
   if (data.length === SAVE_GME_HEADER_SIZE + SAVE_MCR_SIZE && magic === SAVE_GME_MAGIC) {
-    return data.subarray(SAVE_GME_HEADER_SIZE);
+    return 'gme';
   }
-  throw new Error(`Not a .gme or raw memory card file (got ${data.length} bytes)`);
+
+  throw new Error(`Not a .gme, .vmp, or raw memory card file (got ${data.length} bytes)`);
+}
+
+/** Unwrap any supported container down to its raw 128KB memory card. */
+function toRawMcr(data, kind) {
+  if (kind === 'mcr') return data;
+  if (kind === 'gme') return data.subarray(SAVE_GME_HEADER_SIZE);
+  return data.subarray(SAVE_VMP_MCR_OFFSET, SAVE_VMP_MCR_OFFSET + SAVE_MCR_SIZE); // 'vmp'
 }
 
 /** Parse the directory of a raw 128KB card into its 15 slots (mirrors save/mcr.js). */
@@ -93,10 +111,14 @@ function parseRawMcr(data) {
   return slots;
 }
 
-/** Folder name a real POPS build would use under PSP/SAVEDATA/ for this save. */
+/** Folder/file base name a real POPS build would use for this save. */
 function gameFolderName(slot) {
   const code = slot.productCode.replace(/[^A-Za-z0-9]/g, '');
   return code || 'SAVE';
+}
+
+function selectedExportFormat() {
+  return saveExportFormat.querySelector('input[name="saveExportFormat"]:checked').value;
 }
 
 // ── Drop zone ────────────────────────────────────────────────────────────────
@@ -119,28 +141,36 @@ async function handleSaveDrop(file) {
   saveStatus.className = 'status';
   saveSlotList.innerHTML = '';
   saveExtractBtn.disabled = true;
+  saveExportFormat.style.display = 'none';
   hideSaveInfoBox();
   currentMcr = null;
   currentSlots = [];
 
   try {
     const data = new Uint8Array(await file.arrayBuffer());
-    const mcr = stripToRawMcr(data);
+    const kind = detectInputKind(data);
+    const mcr = toRawMcr(data, kind);
     const slots = parseRawMcr(mcr).filter(s => s.type === 'initial');
 
     currentMcr = mcr;
     currentSlots = slots;
     currentSourceName = file.name.replace(/\.[^.]+$/, '');
+    currentMode = kind === 'vmp' ? 'export' : 'vmp';
 
-    const isGme = data.length !== SAVE_MCR_SIZE;
     saveFileName.textContent = file.name;
-    saveFileMeta.innerHTML = `${formatSize(file.size)} <span class="format-label ${isGme ? 'format-gme' : 'format-mcr'}">${isGme ? 'GME' : 'MCR'}</span>`;
+    saveFileMeta.innerHTML = `${formatSize(file.size)} <span class="format-label format-${kind}">${kind.toUpperCase()}</span>`;
     saveFileInfo.style.display = 'block';
+    saveExportFormat.style.display = currentMode === 'export' ? 'flex' : 'none';
 
     renderSlotList();
 
     if (slots.length === 0) {
       saveStatus.textContent = 'No saves found on this card.';
+    } else if (currentMode === 'export') {
+      showSaveInfoBox('Where exported saves go', [
+        `Point your PC emulator's memory card setting (e.g. DuckStation: Settings → Memory Cards) at the downloaded <code>.mcr</code> or <code>.gme</code> file.`,
+        `Multiple saves download as a ZIP of individual files, one per save.`,
+      ]);
     } else {
       showSaveInfoBox('Where extracted saves go on your PSP or PS Vita', [
         `A single save downloads as one <code>.VMP</code> file — copy it to <code>PSP/SAVEDATA/&lt;game&gt;/SCEVMC0.VMP</code> on the memory stick/card, via USB or FTP.`,
@@ -201,7 +231,13 @@ function updateSelectionState() {
   const n = selectedSlots().length;
 
   saveExtractBtn.disabled = n === 0;
-  saveExtractBtn.textContent = n > 1 ? `Extract ${n} Saves (ZIP)` : 'Extract to VMP';
+  if (n > 1) {
+    saveExtractBtn.textContent = currentMode === 'export' ? `Export ${n} Saves (ZIP)` : `Extract ${n} Saves (ZIP)`;
+  } else if (currentMode === 'export') {
+    saveExtractBtn.textContent = `Export to ${selectedExportFormat().toUpperCase()}`;
+  } else {
+    saveExtractBtn.textContent = 'Extract to VMP';
+  }
 
   saveSlotCount.textContent = total > 0 ? `${n} of ${total} selected` : '';
   saveSelectAllBtn.textContent = n === total && total > 0 ? 'Deselect All' : 'Select All';
@@ -212,6 +248,8 @@ saveSelectAllBtn.addEventListener('click', () => {
   for (const cb of allCheckboxes()) cb.checked = shouldSelectAll;
   updateSelectionState();
 });
+
+saveExportFormat.addEventListener('change', updateSelectionState);
 
 // ── Progress helpers ─────────────────────────────────────────────────────────
 
@@ -235,9 +273,9 @@ function hideSaveInfoBox() {
   saveInfoBox.style.display = 'none';
 }
 
-// ── Extraction ───────────────────────────────────────────────────────────────
+// ── Extraction / export ──────────────────────────────────────────────────────
 
-function extractSlotToVmp(mcr, slotIndex, onProgress) {
+function packageSlot(mcr, slotIndex, format, onProgress) {
   return new Promise((resolve, reject) => {
     const worker = new Worker('save-worker.js');
 
@@ -259,7 +297,7 @@ function extractSlotToVmp(mcr, slotIndex, onProgress) {
       reject(new Error(err.message || String(err)));
     };
 
-    worker.postMessage({ mcr: mcr.buffer.slice(mcr.byteOffset, mcr.byteOffset + mcr.byteLength), slotIndex });
+    worker.postMessage({ mcr: mcr.buffer.slice(mcr.byteOffset, mcr.byteOffset + mcr.byteLength), slotIndex, format });
   });
 }
 
@@ -267,28 +305,33 @@ saveExtractBtn.addEventListener('click', async () => {
   const slots = selectedSlots();
   if (slots.length === 0) return;
 
+  const format = currentMode === 'export' ? selectedExportFormat() : 'vmp';
+
   saveExtractBtn.disabled = true;
   saveStatus.textContent = '';
   saveStatus.className = 'status';
-  hideSaveInfoBox();
   showSaveProgress(0, 'Starting...');
 
   const folderCounts = new Map();
-  function nextVmpName(slot) {
+  function nextOutputName(slot) {
     const folder = gameFolderName(slot);
     const n = folderCounts.get(folder) || 0;
     folderCounts.set(folder, n + 1);
-    return { folder, filename: `SCEVMC${n}.VMP` };
+    if (format === 'vmp') return { entryName: `PSP/SAVEDATA/${folder}/SCEVMC${n}.VMP`, singleName: `${folder}-SCEVMC${n}.VMP` };
+    const suffix = n > 0 ? `-${n + 1}` : '';
+    const flatName = `${folder}${suffix}.${format}`;
+    return { entryName: flatName, singleName: flatName };
   }
 
   if (slots.length === 1) {
     try {
-      const vmp = await extractSlotToVmp(currentMcr, slots[0].index, showSaveProgress);
-      const { folder, filename } = nextVmpName(slots[0]);
-      const outName = `${folder}-${filename}`;
-      download(vmp, outName);
+      const data = await packageSlot(currentMcr, slots[0].index, format, showSaveProgress);
+      const { singleName } = nextOutputName(slots[0]);
+      download(data, singleName);
       hideSaveProgress();
-      saveStatus.textContent = `Done — saved as ${outName} (rename to ${filename} for PSP/SAVEDATA/${folder}/)`;
+      saveStatus.textContent = format === 'vmp'
+        ? `Done — saved as ${singleName} (rename to SCEVMC0.VMP for PSP/SAVEDATA/${gameFolderName(slots[0])}/)`
+        : `Done — saved as ${singleName}`;
     } catch (err) {
       saveStatus.textContent = `Error: ${err.message}`;
       saveStatus.className = 'status error';
@@ -301,18 +344,15 @@ saveExtractBtn.addEventListener('click', async () => {
   const perSlotPct = new Array(slots.length).fill(0);
   function updateOverall() {
     const avg = perSlotPct.reduce((a, b) => a + b, 0) / slots.length;
-    showSaveProgress(Math.round(avg * 0.8), `Extracting ${slots.length} saves...`);
+    showSaveProgress(Math.round(avg * 0.8), `Packaging ${slots.length} saves...`);
   }
 
   try {
     const results = await Promise.all(slots.map((slot, i) =>
-      extractSlotToVmp(currentMcr, slot.index, pct => { perSlotPct[i] = pct; updateOverall(); })
+      packageSlot(currentMcr, slot.index, format, pct => { perSlotPct[i] = pct; updateOverall(); })
     ));
 
-    const entries = slots.map((slot, i) => {
-      const { folder, filename } = nextVmpName(slot);
-      return { name: `PSP/SAVEDATA/${folder}/${filename}`, data: results[i] };
-    });
+    const entries = slots.map((slot, i) => ({ name: nextOutputName(slot).entryName, data: results[i] }));
 
     showSaveProgress(80, 'Packaging ZIP...');
     const zipData = await createZipInWorker(entries, (phase, i, total) => {
@@ -320,10 +360,11 @@ saveExtractBtn.addEventListener('click', async () => {
       showSaveProgress(80 + Math.round(zipPct * 20), `Packaging ZIP...`);
     });
 
-    const zipName = `${currentSourceName} (saves).zip`;
+    const zipName = `${currentSourceName} (${format === 'vmp' ? 'saves' : 'export'}).zip`;
     download(zipData, zipName);
     hideSaveProgress();
-    saveStatus.textContent = `Done — ${slots.length} saves extracted. Saved as ${zipName}`;
+    const verb = format === 'vmp' ? 'extracted' : 'exported';
+    saveStatus.textContent = `Done — ${slots.length} saves ${verb}. Saved as ${zipName}`;
   } catch (err) {
     saveStatus.textContent = `Error: ${err.message}`;
     saveStatus.className = 'status error';

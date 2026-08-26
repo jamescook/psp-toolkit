@@ -2,11 +2,14 @@ import { test, expect } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseMcr, MCR_SIZE } from '../../save/mcr.js';
+import { stripGmeHeader, GME_HEADER_SIZE } from '../../save/gme.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DIST_HTML = path.join(ROOT, 'dist', 'index.html');
 const FIXTURES = path.join(ROOT, 'test', 'fixtures');
 const SAVE_GME = path.join(FIXTURES, 'save-test.gme');
+const SAVE_VMP = path.join(FIXTURES, 'save-test.vmp');
 
 const VMP_SIZE = 0x20080;
 const VMP_HEADER_BYTES = [0x00, 0x50, 0x4d, 0x56, 0x80];
@@ -139,5 +142,111 @@ test('mobile viewport: drop, select, and extract remain usable', async ({ page }
   ]);
 
   await expect(page.locator('[data-testid="save-status"]')).toContainText('extracted', { timeout: 10000 });
+  expect(download.suggestedFilename()).toMatch(/\.zip$/);
+});
+
+// ── Reverse flow: VMP in -> MCR/GME out ──────────────────────────────────────
+
+test('drop a .vmp: lists both saves and offers an MCR/GME export choice', async ({ page }) => {
+  await page.locator('[data-testid="save-file-input"]').setInputFiles(SAVE_VMP);
+
+  await expect(page.locator('[data-testid="save-slot-item"]')).toHaveCount(2);
+  await expect(page.locator('[data-testid="save-export-format"]')).toBeVisible();
+  await expect(page.locator('[data-testid="save-info-box"]')).toContainText('PC emulator');
+  await expect(page.locator('#saveFileMeta')).toContainText('VMP');
+
+  // MCR is the default choice.
+  await expect(page.locator('input[name="saveExportFormat"][value="mcr"]')).toBeChecked();
+});
+
+test('single save: export to MCR downloads a valid raw memory card', async ({ page }) => {
+  await page.locator('[data-testid="save-file-input"]').setInputFiles(SAVE_VMP);
+  await expect(page.locator('[data-testid="save-slot-item"]')).toHaveCount(2);
+
+  await page.locator('[data-testid="save-slot-item"]', { hasText: 'SLUS-99999' })
+    .locator('input[type="checkbox"]').check();
+  await expect(page.locator('[data-testid="save-extract-btn"]')).toHaveText('Export to MCR');
+
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.locator('[data-testid="save-extract-btn"]').click(),
+  ]);
+
+  await expect(page.locator('[data-testid="save-status"]')).toContainText('Done', { timeout: 10000 });
+  expect(download.suggestedFilename()).toMatch(/SLUS99999\.mcr$/);
+
+  const mcrBytes = new Uint8Array(fs.readFileSync(await download.path()));
+  expect(mcrBytes.length).toBe(MCR_SIZE);
+  const slots = parseMcr(mcrBytes).filter(s => s.type === 'initial');
+  expect(slots.length).toBe(1);
+  expect(slots[0].productCode).toBe('SLUS-99999');
+});
+
+test('single save: export to GME downloads a valid DexDrive file', async ({ page }) => {
+  await page.locator('[data-testid="save-file-input"]').setInputFiles(SAVE_VMP);
+  await expect(page.locator('[data-testid="save-slot-item"]')).toHaveCount(2);
+
+  await page.locator('input[name="saveExportFormat"][value="gme"]').check();
+  await page.locator('[data-testid="save-slot-item"]', { hasText: 'SLUS-99999' })
+    .locator('input[type="checkbox"]').check();
+  await expect(page.locator('[data-testid="save-extract-btn"]')).toHaveText('Export to GME');
+
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.locator('[data-testid="save-extract-btn"]').click(),
+  ]);
+
+  await expect(page.locator('[data-testid="save-status"]')).toContainText('Done', { timeout: 10000 });
+  expect(download.suggestedFilename()).toMatch(/SLUS99999\.gme$/);
+
+  const gmeBytes = new Uint8Array(fs.readFileSync(await download.path()));
+  expect(gmeBytes.length).toBe(GME_HEADER_SIZE + MCR_SIZE);
+  const slots = parseMcr(stripGmeHeader(gmeBytes)).filter(s => s.type === 'initial');
+  expect(slots.length).toBe(1);
+  expect(slots[0].productCode).toBe('SLUS-99999');
+});
+
+test('multiple saves: export downloads a ZIP of individual .mcr files', async ({ page }) => {
+  await page.locator('[data-testid="save-file-input"]').setInputFiles(SAVE_VMP);
+  await expect(page.locator('[data-testid="save-slot-item"]')).toHaveCount(2);
+
+  await page.locator('[data-testid="save-select-all-btn"]').click();
+  await expect(page.locator('[data-testid="save-extract-btn"]')).toHaveText(/2 Saves \(ZIP\)/);
+
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.locator('[data-testid="save-extract-btn"]').click(),
+  ]);
+
+  await expect(page.locator('[data-testid="save-status"]')).toContainText('2 saves exported', { timeout: 10000 });
+  expect(download.suggestedFilename()).toMatch(/\.zip$/);
+
+  const zipBytes = new Uint8Array(fs.readFileSync(await download.path()));
+  const entries = readZipEntries(zipBytes);
+  expect(entries.length).toBe(2);
+
+  const byName = Object.fromEntries(entries.map(e => [e.name, e.data]));
+  expect(byName['SLUS99999.mcr']).toBeDefined();
+  expect(byName['SCUS88888.mcr']).toBeDefined();
+  expect(byName['SLUS99999.mcr'].length).toBe(MCR_SIZE);
+  expect(byName['SCUS88888.mcr'].length).toBe(MCR_SIZE);
+});
+
+test('mobile viewport: VMP export flow remains usable', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 667 });
+
+  await page.locator('[data-testid="save-file-input"]').setInputFiles(SAVE_VMP);
+  await expect(page.locator('[data-testid="save-slot-item"]')).toHaveCount(2);
+  await expect(page.locator('[data-testid="save-export-format"]')).toBeVisible();
+
+  await page.locator('[data-testid="save-select-all-btn"]').click();
+  await expect(page.locator('[data-testid="save-extract-btn"]')).toBeEnabled();
+
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.locator('[data-testid="save-extract-btn"]').click(),
+  ]);
+
+  await expect(page.locator('[data-testid="save-status"]')).toContainText('exported', { timeout: 10000 });
   expect(download.suggestedFilename()).toMatch(/\.zip$/);
 });
