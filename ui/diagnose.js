@@ -58,6 +58,15 @@ async function detectDiagnoseFormat(file) {
   if (magic5 === 'PATCH') return 'ips';
   if (header[0] === 0x50 && header[1] === 0x50 && header[2] === 0x46) return 'ppf';
 
+  // PS1 save formats (identified by exact size, since none of the three has
+  // a magic byte at offset 0 that's safe to check before size)
+  if (file.size === DIAG_SAVE_MCR_SIZE) return 'save-mcr';
+  if (file.size === DIAG_SAVE_VMP_SIZE && header[1] === 0x50 && header[2] === 0x4d && header[3] === 0x56) return 'save-vmp';
+  if (file.size === DIAG_SAVE_GME_HEADER_SIZE + DIAG_SAVE_MCR_SIZE) {
+    const gmeMagic = String.fromCharCode(...header.slice(0, DIAG_SAVE_GME_MAGIC.length));
+    if (gmeMagic === DIAG_SAVE_GME_MAGIC) return 'save-gme';
+  }
+
   // Raw disc: sync pattern 00 FF FF FF ... FF 00
   if (header[0] === 0x00 && header[1] === 0xFF && header[2] === 0xFF && header[11] === 0x00) return 'disc';
 
@@ -80,6 +89,9 @@ const FORMAT_LABELS = {
   ppf:     { cls: 'format-patch', text: 'PPF' },
   bps:     { cls: 'format-patch', text: 'BPS' },
   xdelta:  { cls: 'format-patch', text: 'VCDIFF' },
+  'save-gme': { cls: 'format-gme', text: 'GME' },
+  'save-mcr': { cls: 'format-mcr', text: 'MCR' },
+  'save-vmp': { cls: 'format-vmp', text: 'VMP' },
   unknown: { cls: 'format-unknown', text: '???' },
 };
 
@@ -121,6 +133,13 @@ async function handleDiagnoseDrop(fileList) {
       case 'disc': {
         const result = await inspectDiscFile(file);
         html = renderDiscResults(result);
+        break;
+      }
+      case 'save-gme':
+      case 'save-mcr':
+      case 'save-vmp': {
+        const result = await inspectSaveFile(file, fmt.slice(5));
+        html = renderSaveResults(result);
         break;
       }
       case 'cue': {
@@ -734,6 +753,152 @@ async function inspectDiscFile(file) {
     discId,
     title,
   };
+}
+
+// ── PS1 save card (GME/MCR/VMP) inspector ────────────────────────────────────
+//
+// Duplicates save/gme.js's stripGmeHeader() and save/mcr.js's parseMcr()
+// locally rather than importing them, same tradeoff as ui/save-manager.js
+// and ui/shared.js's autoDetectDiscId (ui/*.js files are plain concatenated
+// scripts, not ES modules). Unlike save-manager.js, this shows ALL 15 slots
+// (not just active saves) since the point here is transparency into every
+// state, including deleted/corrupted ones. Everything runs synchronously on
+// the main thread except the VMP signature check, which is dispatched to
+// save-worker.js because it needs AES-128-ECB (no native browser API --
+// see save/aes-ecb.js) and duplicating that primitive here would mean two
+// copies of the same crypto code to keep in sync.
+
+const DIAG_SAVE_MCR_SIZE = 131072;
+const DIAG_SAVE_HEADER_SIZE = 128;
+const DIAG_SAVE_MAX_SLOTS = 15;
+const DIAG_SAVE_GME_HEADER_SIZE = 3904;
+const DIAG_SAVE_GME_MAGIC = '123-456-STD';
+const DIAG_SAVE_VMP_SIZE = 0x20080;
+const DIAG_SAVE_VMP_MCR_OFFSET = 0x80;
+
+const DIAG_SAVE_BLOCK_TYPES = {
+  0xa0: 'formatted',
+  0x51: 'initial',
+  0x52: 'middle-link',
+  0x53: 'end-link',
+  0xa1: 'deleted-initial',
+  0xa2: 'deleted-middle-link',
+  0xa3: 'deleted-end-link',
+};
+
+const SAVE_KIND_NAMES = { gme: 'GME (DexDrive)', mcr: 'Raw MCR', vmp: 'VMP (PSP/Vita POPS)' };
+
+function saveAsciiSlice2(buf, start, len) {
+  let s = '';
+  for (let i = 0; i < len; i++) {
+    const b = buf[start + i];
+    if (b === 0) break;
+    s += String.fromCharCode(b);
+  }
+  return s;
+}
+
+/** Unwrap a GME/MCR/VMP file down to its raw 128KB memory card. */
+function saveToRawMcr(data, kind) {
+  if (kind === 'mcr') return data;
+  if (kind === 'gme') return data.subarray(DIAG_SAVE_GME_HEADER_SIZE);
+  return data.subarray(DIAG_SAVE_VMP_MCR_OFFSET, DIAG_SAVE_VMP_MCR_OFFSET + DIAG_SAVE_MCR_SIZE); // 'vmp'
+}
+
+/** Parse all 15 directory slots, including raw state/link bytes for display. */
+function parseSaveMcr(data) {
+  const slots = [];
+  for (let i = 0; i < DIAG_SAVE_MAX_SLOTS; i++) {
+    const off = DIAG_SAVE_HEADER_SIZE * (i + 1);
+    const header = data.subarray(off, off + DIAG_SAVE_HEADER_SIZE);
+    slots.push({
+      index: i,
+      stateByte: header[0],
+      type: DIAG_SAVE_BLOCK_TYPES[header[0]] || 'corrupted',
+      size: header[4] | (header[5] << 8) | (header[6] << 16),
+      nextByte: header[8],
+      region: saveAsciiSlice2(header, 0x0a, 2),
+      productCode: saveAsciiSlice2(header, 0x0c, 10),
+      identifier: saveAsciiSlice2(header, 0x16, 8),
+      name: saveAsciiSlice2(header, 0x0a, 20),
+    });
+  }
+  return slots;
+}
+
+/** Ask save-worker.js to recompute a VMP's signature and report a match/mismatch. */
+function verifyVmpSignature(vmpBytes) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker('save-worker.js');
+
+    worker.onmessage = function(e) {
+      const msg = e.data;
+      if (msg.type === 'done') {
+        worker.terminate();
+        resolve(msg.result);
+      } else if (msg.type === 'error') {
+        worker.terminate();
+        reject(new Error(msg.message));
+      }
+    };
+
+    worker.onerror = function(err) {
+      worker.terminate();
+      reject(new Error(err.message || String(err)));
+    };
+
+    worker.postMessage({ action: 'verifyVmp', vmp: vmpBytes.buffer.slice(vmpBytes.byteOffset, vmpBytes.byteOffset + vmpBytes.byteLength) });
+  });
+}
+
+async function inspectSaveFile(file, kind) {
+  showDiagnoseProgress(0.2, 'Reading card...');
+  const data = new Uint8Array(await file.arrayBuffer());
+  const mcr = saveToRawMcr(data, kind);
+  const slots = parseSaveMcr(mcr);
+  const info = { kind, fileSize: file.size, slots };
+
+  if (kind === 'vmp') {
+    showDiagnoseProgress(0.6, 'Verifying signature...');
+    info.signature = await verifyVmpSignature(data);
+  }
+
+  showDiagnoseProgress(1, 'Done');
+  return info;
+}
+
+function saveTypeLabel(type) {
+  if (type === 'corrupted') return `<span class="check-fail">${esc(type)}</span>`;
+  if (type.startsWith('deleted')) return `<span class="check-warn">${esc(type)}</span>`;
+  return esc(type);
+}
+
+function renderSaveResults(r) {
+  const occupied = r.slots.filter(s => s.type === 'initial' || s.type === 'deleted-initial');
+  const summaryParts = [SAVE_KIND_NAMES[r.kind], formatSize(r.fileSize), `${occupied.length} save${occupied.length !== 1 ? 's' : ''}`];
+  if (r.signature) summaryParts.push(r.signature.valid ? 'signature valid' : 'signature MISMATCH');
+  const summary = `<div class="diagnose-summary">${summaryParts.map(esc).join(' &mdash; ')}</div>`;
+
+  let body = '';
+
+  if (r.signature) {
+    body += '<table>';
+    body += `<tr><td>Signature</td><td>${badge(r.signature.valid, r.signature.valid ? 'matches recomputed hash' : `expected ${r.signature.expected}, got ${r.signature.stored}`)}</td></tr>`;
+    body += '</table>';
+  }
+
+  body += '<table>';
+  body += '<tr><td>Slot</td><td>State</td><td>Region/Code</td><td>Size</td><td>Link</td></tr>';
+  for (const s of r.slots) {
+    const stateLabel = `${saveTypeLabel(s.type)} <span class="hex">${hex(s.stateByte)}</span>`;
+    const codeLabel = s.productCode ? esc(s.name) : '<span style="color:#666">&mdash;</span>';
+    const sizeLabel = s.size > 0 ? formatSize(s.size) : '';
+    const linkLabel = s.nextByte === 0xff ? '' : `&rarr; slot ${s.nextByte}`;
+    body += `<tr><td>${s.index}</td><td>${stateLabel}</td><td>${codeLabel}</td><td>${sizeLabel}</td><td>${linkLabel}</td></tr>`;
+  }
+  body += '</table>';
+
+  return summary + collapsibleSection('Memory Card Directory (all 15 slots)', body, true);
 }
 
 async function inspectCueFile(file) {
