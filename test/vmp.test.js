@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  generateHash, buildVmp,
+  generateHash, buildVmp, extractMcr,
   VMP_HEADER_BYTES, MCR_OFFSET, VMP_SEED_OFFSET, VMP_HASH_OFFSET, VMP_SIZE,
   MCR_SIZE,
 } from './helpers.js';
@@ -93,5 +93,23 @@ describe('buildVmp', () => {
     const recomputed = await generateHash(recomputeInput, seed, VMP_SIZE);
 
     assert.equal(hex(writtenSignature), hex(recomputed));
+  });
+});
+
+describe('extractMcr', () => {
+  it('throws on wrong-length input', () => {
+    assert.throws(() => extractMcr(new Uint8Array(100)), /131200/);
+  });
+
+  it('returns exactly MCR_SIZE bytes', async () => {
+    const vmp = await buildVmp(new Uint8Array(MCR_SIZE));
+    assert.equal(extractMcr(vmp).length, MCR_SIZE);
+  });
+
+  it('round-trips: buildVmp then extractMcr recovers the original card byte-for-byte', async () => {
+    const mcr = new Uint8Array(MCR_SIZE);
+    for (let i = 0; i < mcr.length; i++) mcr[i] = (i * 17 + 5) & 0xff;
+    const vmp = await buildVmp(mcr);
+    assert.equal(hex(extractMcr(vmp)), hex(mcr));
   });
 });

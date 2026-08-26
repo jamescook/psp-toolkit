@@ -83,6 +83,23 @@ export async function generateHash(input, seed, sz) {
 }
 
 /**
+ * Extract the raw 128KB PS1 memory card payload from a .vmp file.
+ *
+ * No signature verification -- a .vmp read back from POPS/PSP hardware was
+ * already trusted when it was written; this is purely for exporting it to a
+ * PC emulator, which just wants the raw card.
+ *
+ * @param {Uint8Array} vmp - a complete VMP_SIZE-byte .vmp file
+ * @returns {Uint8Array} raw memory card, exactly MCR_SIZE bytes
+ */
+export function extractMcr(vmp) {
+  if (vmp.length !== VMP_SIZE) {
+    throw new Error(`Expected a ${VMP_SIZE}-byte VMP file, got ${vmp.length}`);
+  }
+  return vmp.slice(MCR_OFFSET, MCR_OFFSET + MCR_SIZE);
+}
+
+/**
  * Build a complete .vmp file from a raw 128KB PS1 memory card.
  * @param {Uint8Array} mcr - raw memory card, exactly MCR_SIZE bytes
  * @returns {Promise<Uint8Array>} complete VMP_SIZE-byte .vmp file
