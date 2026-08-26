@@ -27,6 +27,9 @@
       <button class="tab-btn" data-tab="patch">
         <span class="tab-icon">&#129529;</span> Patch
       </button>
+      <button class="tab-btn" data-tab="save">
+        <span class="tab-icon">&#128179;</span> Save Manager
+      </button>
     </nav>
 
     <main class="tab-content">
@@ -229,6 +232,41 @@
         <div class="status" id="patchStatus" data-testid="patch-status"></div>
       </div>
 
+      <!-- ═══ Save Manager Tab ═══ -->
+      <div class="tab-panel" id="panel-save">
+        <div class="drop-zone" id="saveDropZone" data-testid="save-drop-zone">
+          <span class="icon">&#128179;</span>
+          <p>Drop a PS1 save card here<br><small>.gme (DexDrive) or raw .mcr</small></p>
+        </div>
+        <input type="file" id="saveFileInput" data-testid="save-file-input" accept=".gme,.mcr,.mcd">
+
+        <div class="file-info" id="saveFileInfo">
+          <div class="name" id="saveFileName"></div>
+          <div class="meta" id="saveFileMeta"></div>
+        </div>
+
+        <div class="save-slot-controls" id="saveSlotControls" style="display:none">
+          <button class="save-select-all-btn" id="saveSelectAllBtn" data-testid="save-select-all-btn">Select All</button>
+          <span class="save-slot-count" id="saveSlotCount"></span>
+        </div>
+        <div class="save-slot-list" id="saveSlotList" data-testid="save-slot-list"></div>
+
+        <div class="actions save-actions" id="saveActions" data-testid="save-actions">
+          <button class="btn-save" id="saveExtractBtn" data-testid="save-extract-btn" disabled>Extract to VMP</button>
+        </div>
+
+        <div class="progress-area" id="saveProgressArea">
+          <div class="progress-bar-bg"><div class="progress-bar-fill" id="saveProgressFill"></div></div>
+          <div class="progress-text">
+            <span id="saveProgressLabel">Processing...</span>
+            <span id="saveProgressPct" data-testid="save-progress-pct">0%</span>
+          </div>
+        </div>
+
+        <div class="status" id="saveStatus" data-testid="save-status"></div>
+        <div class="save-info-box" id="saveInfoBox" data-testid="save-info-box" style="display:none"></div>
+      </div>
+
     </main>
   </div>
 </div>
@@ -244,5 +282,6 @@
 <script src="ui/eboot-ui.js"></script>
 <script src="ui/diagnose.js"></script>
 <script src="ui/patch.js"></script>
+<script src="ui/save-manager.js"></script>
 </body>
 </html>
