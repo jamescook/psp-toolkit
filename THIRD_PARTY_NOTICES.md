@@ -1,8 +1,9 @@
 # Third-Party Notices & Prior Art
 
-This project's PS1-to-EBOOT (PBP) conversion is informed by the following
-open-source projects and community documentation. No code is copied; these
-serve as format references for a clean-room JavaScript implementation.
+This project's PS1-to-EBOOT (PBP) conversion and PS1 save conversion (Save
+Manager) are informed by the following open-source projects and community
+documentation. No code is copied; these serve as format references for a
+clean-room JavaScript implementation.
 
 ## Reference Implementations
 
@@ -32,6 +33,24 @@ serve as format references for a clean-room JavaScript implementation.
 - **Repository:** https://github.com/PSP-Tools/copstation
 - **Language:** C
 - **Relevance:** Additional reference for the popstation format.
+
+### apollo-psp
+- **Repository:** https://github.com/bucanero/apollo-psp
+- **Language:** C
+- **License:** GPL-3.0
+- **Relevance:** Primary reference for this project's Save Manager feature.
+  `source/vmp_resign.c` is the reference for VMP construction/signing (the
+  AES-128 + SHA-1 scheme in `save/vmp.js`'s `generateHash`), and
+  `source/ps1card.c` is the reference for the PS1 memory card directory-frame
+  layout used in `save/mcr.js` (including the GME header layout in
+  `save/gme.js`). Itself credits Shendo's MemcardRex
+  (https://github.com/ShendoXT/memcardrex) as the basis for its memory card
+  handling.
+
+### vita-mcr2vmp
+- **Repository:** https://github.com/dots-tb/vita-mcr2vmp
+- **Relevance:** Original VMP signing scheme that apollo-psp's
+  `vmp_resign.c` is based on.
 
 ## Format Documentation
 
