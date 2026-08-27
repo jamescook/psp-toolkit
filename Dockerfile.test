@@ -13,9 +13,10 @@ COPY vendor/ vendor/
 COPY cso/ cso/
 COPY eboot/ eboot/
 COPY patch/ patch/
+COPY save/ save/
 COPY ui/ ui/
 COPY app.html style.css build.js ./
-COPY worker.js compress-worker.js cso-compress-worker.js eboot-worker.js patch-worker.js zip-worker.js ./
+COPY worker.js compress-worker.js cso-compress-worker.js eboot-worker.js patch-worker.js zip-worker.js save-worker.js ./
 RUN node build.js
 
 # Layer 3: test infrastructure (changes here don't invalidate build)
