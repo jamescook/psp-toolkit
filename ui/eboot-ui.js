@@ -121,7 +121,7 @@ document.getElementById('artPic0Input').addEventListener('change', async functio
 });
 document.getElementById('artPic1Input').addEventListener('change', async function() {
   if (!this.files[0]) return;
-  currentPic1 = await resizeImageToUint8Array(this.files[0], 480, 272);
+  currentPic1 = await resizeImageToUint8Array(this.files[0], 480, 272, 'cover');
   artPic1.src = URL.createObjectURL(new Blob([currentPic1], { type: 'image/png' }));
   pic1IsCustom = true;
   document.getElementById('artPic1Reset').style.display = 'inline';

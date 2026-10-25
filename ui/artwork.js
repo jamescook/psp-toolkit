@@ -9,6 +9,28 @@
 // The defaults render the game title and disc ID on a dark background.
 // Users can replace any slot with custom artwork via the UI.
 
+// ── Fitting an image into a slot ─────────────────────────────────────────────
+// Fetched covers and uploads rarely match a slot's shape: a PS1 cover is
+// square and a PSP cover tall, while ICON0 is wide. Stretching distorts them,
+// so an image is either fitted whole (containRect) or cropped to fill
+// (coverRect), keeping its proportions either way.
+
+/** Where to draw a srcW×srcH image so all of it shows in dstW×dstH, centred. */
+function containRect(srcW, srcH, dstW, dstH) {
+  const scale = Math.min(dstW / srcW, dstH / srcH);
+  return centredRect(Math.round(srcW * scale), Math.round(srcH * scale), dstW, dstH);
+}
+
+/** Where to draw a srcW×srcH image so it fills dstW×dstH, centred, with the overflow cropped. */
+function coverRect(srcW, srcH, dstW, dstH) {
+  const scale = Math.max(dstW / srcW, dstH / srcH);
+  return centredRect(Math.round(srcW * scale), Math.round(srcH * scale), dstW, dstH);
+}
+
+function centredRect(w, h, dstW, dstH) {
+  return { x: Math.round((dstW - w) / 2), y: Math.round((dstH - h) / 2), w, h };
+}
+
 /** Find the largest font size (between maxSize and minSize) that fits text in maxWidth. */
 function fitText(ctx, text, maxWidth, maxSize, minSize) {
   for (let size = maxSize; size >= minSize; size--) {

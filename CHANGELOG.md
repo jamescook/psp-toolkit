@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- EBOOT artwork keeps its proportions: covers and title images are fitted whole over a blurred copy of themselves instead of stretched, and backgrounds are cropped to fill
 - EBOOT tab refuses a PSP game: an EBOOT runs in the PSP's PS1 emulator, so a PSP game in one cannot start. It disables the controls and says to put the ISO or a CSO in the `ISO` folder instead
 
 ## [0.3.0] - 2026-10-25

@@ -218,7 +218,7 @@ async function regenerateDefaults() {
   if (!pic1IsCustom) {
     if (fetched.pic1) {
       currentPic1 = await resizeImageToUint8Array(
-        new Blob([fetched.pic1], { type: 'image/jpeg' }), 480, 272);
+        new Blob([fetched.pic1], { type: 'image/jpeg' }), 480, 272, 'cover');
     } else {
       currentPic1 = await generateDefaultPic1(title);
     }
@@ -227,7 +227,7 @@ async function regenerateDefaults() {
 }
 
 /** Load an image file, resize it to targetW×targetH, and return as PNG Uint8Array. */
-function resizeImageToUint8Array(file, targetW, targetH) {
+function resizeImageToUint8Array(file, targetW, targetH, fit = 'contain') {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
@@ -235,7 +235,14 @@ function resizeImageToUint8Array(file, targetW, targetH) {
       c.width = targetW;
       c.height = targetH;
       const ctx = c.getContext('2d');
-      ctx.drawImage(img, 0, 0, targetW, targetH);
+      if (fit === 'cover') {
+        const r = coverRect(img.width, img.height, targetW, targetH);
+        ctx.drawImage(img, r.x, r.y, r.w, r.h);
+      } else {
+        drawBlurredBackdrop(ctx, img, targetW, targetH);
+        const r = containRect(img.width, img.height, targetW, targetH);
+        ctx.drawImage(img, r.x, r.y, r.w, r.h);
+      }
       c.toBlob(blob => {
         blob.arrayBuffer().then(buf => resolve(new Uint8Array(buf)));
       }, 'image/png');
@@ -244,6 +251,23 @@ function resizeImageToUint8Array(file, targetW, targetH) {
     img.onerror = () => { URL.revokeObjectURL(img.src); reject(new Error('Failed to load image')); };
     img.src = URL.createObjectURL(file);
   });
+}
+
+/**
+ * Fill the canvas with a blurred, darkened copy of img, cropped to fill, for a
+ * fitted image to sit on. Blurs by drawing at 1/8 size and scaling back up,
+ * which every browser does (canvas filter is missing from older Safari).
+ */
+function drawBlurredBackdrop(ctx, img, w, h) {
+  const small = document.createElement('canvas');
+  small.width = Math.max(1, Math.round(w / 8));
+  small.height = Math.max(1, Math.round(h / 8));
+  const r = coverRect(img.width, img.height, small.width, small.height);
+  small.getContext('2d').drawImage(img, r.x, r.y, r.w, r.h);
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(small, 0, 0, w, h);
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+  ctx.fillRect(0, 0, w, h);
 }
 
 // ── Format detection ─────────────────────────────────────────────────────────
