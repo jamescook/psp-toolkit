@@ -9,7 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const src = fs.readFileSync(path.join(__dirname, '..', 'ui', 'run-worker.js'), 'utf8');
 
 function loadRunWorker(console = { error() {} }) {
-  const ctx = vm.createContext({ Promise, Error, Blob, MessageChannel, console });
+  const ctx = vm.createContext({ Promise, Error, Blob, MessageChannel, AbortController, console });
   vm.runInContext(src, ctx);
   return ctx.runWorker;
 }
@@ -101,10 +101,32 @@ describe('runWorker', () => {
 
     await assert.rejects(job, { message: 'Worker error: blob:abc:12 error' });
   });
+
+  it('stops the worker and rejects as cancelled when the signal aborts', async () => {
+    const runWorker = loadRunWorker();
+    const worker = new FakeWorker();
+    const controller = new AbortController();
+    const job = runWorker(worker, {}, { signal: controller.signal });
+    controller.abort();
+
+    await assert.rejects(job, { name: 'AbortError' });
+    assert.equal(worker.terminated, true);
+  });
+
+  it('does not start a worker whose signal has already aborted', async () => {
+    const runWorker = loadRunWorker();
+    const worker = new FakeWorker();
+    const controller = new AbortController();
+    controller.abort();
+
+    await assert.rejects(runWorker(worker, {}, { signal: controller.signal }), { name: 'AbortError' });
+    assert.equal(worker.posted.length, 0);
+    assert.equal(worker.terminated, true);
+  });
 });
 
 function loadRunWorkerPool() {
-  const ctx = vm.createContext({ Promise, Error, Blob, MessageChannel, console: { error() {} } });
+  const ctx = vm.createContext({ Promise, Error, Blob, MessageChannel, AbortController, console: { error() {} } });
   vm.runInContext(src, ctx);
   return ctx.runWorkerPool;
 }
@@ -166,5 +188,14 @@ describe('runWorkerPool', () => {
     workers[1].reply({ type: 'error', message: 'out of memory' });
 
     await assert.rejects(pool, { message: 'out of memory' });
+  });
+
+  it('stops every worker when the signal aborts', async () => {
+    const controller = new AbortController();
+    const { pool, workers } = startPool(['a', 'b', 'c'], 3, { signal: controller.signal });
+    controller.abort();
+
+    await assert.rejects(pool, { name: 'AbortError' });
+    assert.deepEqual(workers.map(w => w.terminated), [true, true, true]);
   });
 });

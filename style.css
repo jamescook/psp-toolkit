@@ -180,17 +180,6 @@ input[type="file"] { display: none; }
   justify-content: space-between;
   align-items: center;
 }
-.cancel-btn {
-  background: none;
-  border: none;
-  color: #e55;
-  font-size: 1.1rem;
-  cursor: pointer;
-  padding: 0 0.3rem;
-  line-height: 1;
-  opacity: 0.7;
-}
-.cancel-btn:hover { opacity: 1; }
 .status {
   margin-top: 0.8rem;
   font-size: var(--font-md);
@@ -338,25 +327,6 @@ input[type="file"] { display: none; }
   color: var(--text-dim);
   margin-top: 0.3rem;
   text-align: center;
-}
-
-/* Build log */
-.build-log-area {
-  margin-top: 0.6rem;
-  text-align: center;
-}
-.build-log-area a {
-  color: var(--accent);
-  font-size: var(--font-md);
-  text-decoration: none;
-  border: 1px solid var(--accent);
-  padding: 0.35rem 0.8rem;
-  border-radius: 6px;
-  display: inline-block;
-  transition: background 0.15s;
-}
-.build-log-area a:hover {
-  background: rgba(124, 131, 255, 0.15);
 }
 
 /* Artwork previews */
@@ -578,6 +548,173 @@ input[type="file"] { display: none; }
     padding: 0.5rem 0.4rem;
     font-size: var(--font-sm);
   }
+}
+
+/* Queue tray — sticks to the bottom of the window, absent until a job is added */
+.queue-tray {
+  position: sticky;
+  bottom: 0;
+  align-self: stretch;
+  margin: auto -2rem -2rem; /* auto top: sit against the bottom edge when the page is shorter than the window */
+  background: var(--bg-panel);
+  border-top: 1px solid var(--bg-progress);
+  padding: 0.6rem 2rem calc(1rem + env(safe-area-inset-bottom));
+  z-index: 10;
+}
+.queue-tray[hidden] { display: none; }
+.container:has(+ .queue-tray:not([hidden])) { margin-bottom: 1.5rem; }
+.queue-inner {
+  max-width: 1000px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+.queue-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.queue-toggle {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.queue-title {
+  flex: none;
+  font-size: var(--font-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-light);
+}
+.queue-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-sm);
+  color: var(--text-secondary);
+}
+.queue-chevron {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid var(--text-secondary);
+  border-bottom: 2px solid var(--text-secondary);
+  transform: rotate(45deg) translate(-2px, -2px);
+}
+.queue-tray.folded .queue-chevron { transform: rotate(-135deg) translate(-2px, -2px); }
+.queue-jobs {
+  list-style: none;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(220px, 1fr);
+  gap: 0.7rem;
+  overflow-x: auto;
+  padding-bottom: 0.2rem;
+}
+.queue-job {
+  background: var(--bg-hover);
+  border: 1px solid var(--bg-progress);
+  border-radius: 8px;
+  padding: 0.7rem 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.queue-job[data-state="running"] { border-color: var(--accent); }
+.queue-job[data-state="editing"] { border-style: dashed; border-color: var(--warn); }
+.queue-job-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: var(--font-sm);
+}
+.queue-job-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-white);
+  font-weight: 600;
+}
+.queue-job-pct { flex: none; color: #a5aaff; }
+.queue-job-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-progress);
+  overflow: hidden;
+}
+.queue-job-bar[hidden] { display: none; }
+.queue-job-fill {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+}
+.queue-job-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.queue-job-detail { font-size: var(--font-xs); color: var(--text-secondary); }
+.queue-job-actions { display: flex; gap: 0.4rem; }
+.queue-btn {
+  min-height: 36px;
+  padding: 0 0.8rem;
+  border: 1px solid var(--border-muted);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-light);
+  font: inherit;
+  font-size: var(--font-sm);
+  cursor: pointer;
+}
+.queue-btn:hover { background: var(--bg-progress); }
+.queue-link {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+}
+.queue-finished {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: var(--font-xs);
+  color: var(--text-secondary);
+}
+.queue-done::before { content: '\2713  '; color: var(--success); }
+.queue-failed::before { content: '\2715  '; color: var(--error); }
+.queue-cancelled::before { content: '\2013  '; }
+.queue-dest { font-size: var(--font-xs); color: var(--text-secondary); }
+
+@media (max-width: 700px) {
+  .queue-tray { padding: 0.4rem 1rem calc(1rem + env(safe-area-inset-bottom)); }
+  /* Opened on a phone, the whole tray scrolls rather than covering the page */
+  .queue-tray:not(.folded) .queue-inner { max-height: 60vh; overflow-y: auto; }
+  .queue-jobs {
+    grid-auto-flow: row;
+    grid-auto-columns: auto;
+    overflow-x: visible;
+  }
+  .queue-btn { min-height: 44px; }
 }
 
 /* Patch tab — staged files */

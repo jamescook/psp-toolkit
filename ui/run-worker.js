@@ -23,11 +23,17 @@
  * @param {object} [options]
  * @param {ArrayBuffer[]} [options.transfer] - buffers to move to the worker rather than copy
  * @param {function(object): void} [options.onProgress] - called with each progress message
+ * @param {AbortSignal} [options.signal] - aborting terminates the worker and
+ *   rejects with an Error named 'AbortError'
  * @returns {Promise<object>} the worker's 'done' message. On a reported error
  *   it rejects with an Error whose `workerMessage` is the worker's full error
  *   message, so extra fields such as `buildLog` survive.
  */
-function runWorker(worker, message, { transfer = [], onProgress } = {}) {
+function runWorker(worker, message, { transfer = [], onProgress, signal } = {}) {
+  if (signal?.aborted) {
+    worker.terminate();
+    return Promise.reject(createCancelledError());
+  }
   const files = [];
   const posted = describeFiles(message, files);
   let filePort = null;
@@ -40,10 +46,16 @@ function runWorker(worker, message, { transfer = [], onProgress } = {}) {
   }
 
   return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      finish();
+      reject(createCancelledError());
+    };
     const finish = () => {
       worker.terminate();
       filePort?.close();
+      signal?.removeEventListener('abort', onAbort);
     };
+    signal?.addEventListener('abort', onAbort);
     worker.onmessage = function(e) {
       const msg = e.data;
       if (msg.type === 'progress') {
@@ -65,6 +77,11 @@ function runWorker(worker, message, { transfer = [], onProgress } = {}) {
     };
     worker.postMessage(posted, transfer);
   });
+}
+
+/** The error a cancelled job rejects with; check `err.name === 'AbortError'`. */
+function createCancelledError() {
+  return Object.assign(new Error('Cancelled'), { name: 'AbortError' });
 }
 
 /** Copy `value`, swapping each File or Blob for { remoteFile, name, size } and collecting it in `files`. */
@@ -103,22 +120,32 @@ async function serveFileRead(port, files, { id, index, start, end }) {
  * @param {function(Array): ArrayBuffer[]} [options.transfer] - buffers to move for one range
  * @param {function(number, number): void} [options.onProgress] - called with the
  *   fraction complete averaged across workers (0–1) and the number of workers
- * @returns {Promise<object[]>} each worker's 'done' message, in range order
+ * @param {AbortSignal} [options.signal] - aborting stops every worker
+ * @returns {Promise<object[]>} each worker's 'done' message, in range order.
+ *   If one worker fails, the others are stopped.
  */
-function runWorkerPool(createWorker, blocks, workerCount, { message, transfer, onProgress }) {
+function runWorkerPool(createWorker, blocks, workerCount, { message, transfer, onProgress, signal }) {
   const blocksPerWorker = Math.ceil(blocks.length / workerCount);
   const ranges = [];
   for (let start = 0; start < blocks.length; start += blocksPerWorker) {
     ranges.push(blocks.slice(start, start + blocksPerWorker));
   }
 
+  const stopAll = new AbortController();
+  if (signal?.aborted) stopAll.abort();
+  signal?.addEventListener('abort', () => stopAll.abort());
+
   const workerProgress = new Array(ranges.length).fill(0);
   return Promise.all(ranges.map((range, i) => runWorker(createWorker(), message(range), {
     transfer: transfer?.(range),
+    signal: stopAll.signal,
     onProgress: (msg) => {
       workerProgress[i] = msg.blockIndex / msg.totalBlocks;
       const average = workerProgress.reduce((a, b) => a + b, 0) / ranges.length;
       onProgress?.(average, ranges.length);
     },
-  })));
+  }))).catch((err) => {
+    stopAll.abort();
+    throw err;
+  });
 }

@@ -135,13 +135,22 @@ function createZip(entries) {
   return new Uint8Array(buf);
 }
 
+/** How far through a ZIP createZipInWorker is (0–1): checksumming is about 60% of the work, copying 40%. */
+function measureZipProgress(phase, index, total) {
+  if (phase === 'crc') return index / total * 0.6;
+  if (phase === 'alloc') return 0.6;
+  return 0.6 + (index + 1) / total * 0.4;
+}
+
 /** Create a ZIP archive in a Web Worker (off the main thread).
  *  @param {Array<{name: string, data: Uint8Array}>} entries
  *  @param {function(string, number, number): void} [onProgress] - called with (phase, index, total)
+ *  @param {AbortSignal} [signal] - aborting stops the worker
  *  @returns {Promise<Uint8Array>} */
-async function createZipInWorker(entries, onProgress) {
+async function createZipInWorker(entries, onProgress, signal) {
   const message = { entries: entries.map(e => ({ name: e.name, data: e.data.buffer })) };
   const done = await runWorker(new Worker('zip-worker.js'), message, {
+    signal,
     transfer: entries.map(e => e.data.buffer),
     onProgress: (msg) => onProgress?.(msg.phase, msg.index, msg.total),
   });

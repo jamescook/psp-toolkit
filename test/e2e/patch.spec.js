@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { expectSaved, expectFailed } from './queue-helpers.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const FIXTURES = path.join(ROOT, 'test', 'fixtures');
@@ -84,7 +85,7 @@ test('upload both together: button enabled, apply and download', async ({ page }
   expect(result[0]).toBe(0x00);
   expect(result[1]).toBe(0x01);
 
-  await expect(page.locator('[data-testid="patch-status"]')).toContainText('Done');
+  await expectSaved(page, 'patch-test (patched).bin');
   await expect(page).toHaveScreenshot('patch-applied.png');
 });
 
@@ -145,7 +146,7 @@ test('PPF block check passes with correct source image', async ({ page }) => {
   expect(result[0x10]).toBe(0xCA);
   expect(result[0x11]).toBe(0xFE);
 
-  await expect(page.locator('[data-testid="patch-status"]')).toContainText('Done');
+  await expectSaved(page, 'patch-test-large (patched).bin');
 });
 
 test('PPF block check fails with wrong source image', async ({ page }) => {
@@ -155,7 +156,7 @@ test('PPF block check fails with wrong source image', async ({ page }) => {
   await expect(page.locator('[data-testid="apply-patch"]')).toBeEnabled();
   await page.locator('[data-testid="apply-patch"]').click();
 
-  await expect(page.locator('[data-testid="patch-status"]')).toContainText('block check failed');
+  expect(await expectFailed(page)).toContain('block check failed');
 });
 
 test('xdelta patch: upload ROM + .xdelta → verify patched output', async ({ page }) => {
@@ -182,8 +183,8 @@ test('xdelta patch: upload ROM + .xdelta → verify patched output', async ({ pa
   expect(result[0]).toBe(0x00);
   expect(result[1]).toBe(0x01);
 
-  await expect(page.locator('[data-testid="patch-status"]')).toContainText('Done');
-  await expect(page.locator('[data-testid="patch-status"]')).toContainText('XDELTA');
+  await expectSaved(page, 'patch-test (patched).bin');
+  await expectSaved(page, 'XDELTA patch applied');
 });
 
 test('xdelta multi-window LZMA: 1MB ROM + 32-window patch completes without error', async ({ page }) => {
@@ -198,8 +199,8 @@ test('xdelta multi-window LZMA: 1MB ROM + 32-window patch completes without erro
     page.locator('[data-testid="apply-patch"]').click(),
   ]);
 
-  await expect(page.locator('[data-testid="patch-status"]')).toContainText('Done', { timeout: 30000 });
-  await expect(page.locator('[data-testid="patch-status"]')).toContainText('XDELTA');
+  await expectSaved(page, 'vcdiff-multi-source (patched).bin');
+  await expectSaved(page, 'XDELTA patch applied');
   expect(download.suggestedFilename()).toMatch(/patched/);
 });
 
@@ -222,7 +223,7 @@ test('multi-disc: upload 3 ROMs + 3 patches → single ZIP download with correct
   const downloadPromise = page.waitForEvent('download');
 
   await page.locator('[data-testid="apply-patch"]').click();
-  await expect(page.locator('[data-testid="patch-status"]')).toContainText('3 patches applied', { timeout: 30000 });
+  await expectSaved(page, '3 patches applied');
 
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(/\.zip$/);

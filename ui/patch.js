@@ -16,10 +16,6 @@ const patchPatchName = document.getElementById('patchPatchName');
 const patchPatchList = document.getElementById('patchPatchList');
 const patchApplyBtn = document.getElementById('patchApplyBtn');
 const patchClearBtn = document.getElementById('patchClearBtn');
-const patchProgressArea = document.getElementById('patchProgressArea');
-const patchProgressFill = document.getElementById('patchProgressFill');
-const patchProgressLabel = document.getElementById('patchProgressLabel');
-const patchProgressPct = document.getElementById('patchProgressPct');
 const patchStatus = document.getElementById('patchStatus');
 
 let patchRomFiles = [];
@@ -246,129 +242,87 @@ function updatePatchStaged() {
   }
 }
 
-// ── Progress helpers ─────────────────────────────────────────────────────────
+// ── Jobs ─────────────────────────────────────────────────────────────────────
+// Applying is a queue job (queue-tray.js): the staged pairs are captured when
+// it is added, so the tab is free for the next set while it waits.
 
-function showPatchProgress(pct, label) {
-  patchProgressArea.style.display = 'block';
-  patchProgressFill.style.width = pct + '%';
-  patchProgressPct.textContent = pct + '%';
-  patchProgressLabel.textContent = label;
+/** "Game (USA).bin" -> "Game (USA) (patched).bin" */
+function namePatchedFile(romFile) {
+  const baseName = romFile.name.replace(/\.[^.]+$/, '');
+  const ext = romFile.name.match(/\.[^.]+$/)?.[0] || '';
+  return baseName + ' (patched)' + ext;
 }
 
-function hidePatchProgress() {
-  patchProgressArea.style.display = 'none';
+function buildPatchJob() {
+  const pairCount = Math.min(patchRomFiles.length, patchPatchFiles.length);
+  const roms = patchRomFiles.slice(0, pairCount);
+  const patches = patchPatchFiles.slice(0, pairCount);
+  return {
+    kind: 'patch',
+    key: `patch|${roms.map(fingerprintFile).join('+')}|${patches.map(fingerprintFile).join('+')}`,
+    label: pairCount === 1 ? roms[0].name : `${pairCount} discs`,
+    detail: pairCount === 1 ? `Patch with ${patches[0].name}` : `Patch \u00b7 ${pairCount} pairs`,
+    settings: { roms, patches },
+    run: runPatchJob,
+  };
 }
 
-// ── Apply (parallel batch) ───────────────────────────────────────────────────
-
-async function applyPair(rom, patch, onProgress) {
+async function applyPair(rom, patch, onProgress, signal) {
   const done = await runWorker(new Worker('patch-worker.js'), { rom, patch }, {
+    signal,
     onProgress: (msg) => onProgress?.(msg.pct, msg.label),
   });
   return { result: new Uint8Array(done.result), format: done.format };
 }
 
-patchApplyBtn.addEventListener('click', async () => {
-  const pairCount = Math.min(patchRomFiles.length, patchPatchFiles.length);
-  if (pairCount === 0) return;
-
-  patchApplyBtn.disabled = true;
-  patchClearBtn.style.display = 'none';
-  patchStatus.textContent = '';
-  patchStatus.className = 'status';
-  showPatchProgress(0, 'Starting...');
-
-  // Build output filename helper
-  function patchedName(romFile) {
-    const baseName = romFile.name.replace(/\.[^.]+$/, '');
-    const ext = romFile.name.match(/\.[^.]+$/)?.[0] || '';
-    return baseName + ' (patched)' + ext;
+async function runPatchJob({ roms, patches }, { onProgress, signal }) {
+  // The patch worker reports 0-100; the queue wants 0-1.
+  if (roms.length === 1) {
+    const { result, format } = await applyPair(roms[0], patches[0], (pct, label) => onProgress(pct / 100, label), signal);
+    return { outputs: [{ name: namePatchedFile(roms[0]), data: result }], note: `${format.toUpperCase()} patch applied` };
   }
 
-  if (pairCount === 1) {
-    // Single pair — direct download, no ZIP
-    try {
-      const { result, format } = await applyPair(patchRomFiles[0], patchPatchFiles[0], (pct, label) => {
-        showPatchProgress(pct, label);
-      });
-      const filename = patchedName(patchRomFiles[0]);
-      download(result, filename);
-      hidePatchProgress();
-      patchStatus.textContent = `Done — ${format.toUpperCase()} patch applied. Saved as ${filename}`;
-    } catch (err) {
-      patchStatus.textContent = `Error: ${err.message}`;
-      patchStatus.className = 'status error';
-      hidePatchProgress();
-    }
-    patchApplyBtn.disabled = false;
-    patchClearBtn.style.display = '';
-    return;
-  }
+  // Several pairs run in parallel and are bundled into a ZIP: 0-70% patching, 70-100% packaging.
+  const perPairPct = new Array(roms.length).fill(0);
+  const results = await Promise.all(roms.map((rom, i) => applyPair(rom, patches[i], (pct) => {
+    perPairPct[i] = pct;
+    const avg = perPairPct.reduce((a, b) => a + b, 0) / roms.length;
+    onProgress(avg / 100 * 0.70, `Patching ${roms.length} discs...`);
+  }, signal)));
 
-  // Multiple pairs — run workers in parallel, bundle into ZIP
-  // Reserve 0–70% for patching, 70–100% for ZIP packaging (CRC + copy is slow for large files)
-  const perPairPct = new Array(pairCount).fill(0);
-  const perPairLabel = new Array(pairCount).fill('Starting...');
+  const entries = results.map((r, i) => ({ name: namePatchedFile(roms[i]), data: r.result }));
+  onProgress(0.70, 'Packaging ZIP...');
+  const zipData = await createZipInWorker(entries, (phase, i, total) => {
+    const zipPct = measureZipProgress(phase, i, total);
+    onProgress(0.70 + zipPct * 0.30, 'Packaging ZIP...');
+  }, signal);
 
-  function updateOverallProgress() {
-    const avg = perPairPct.reduce((a, b) => a + b, 0) / pairCount;
-    const scaled = Math.round(avg * 0.70);
-    const parts = perPairPct.map((p, i) => {
-      const name = patchRomFiles[i].name;
-      if (p >= 100) return `${name} ✓`;
-      return `${name} ${p}%`;
-    });
-    showPatchProgress(scaled, parts.join(' · '));
-  }
+  const baseName = roms[0].name.replace(/\.[^.]+$/, '').replace(/\s*\(.*?\)\s*/g, ' ').trim();
+  return { outputs: [{ name: baseName + ' (patched).zip', data: zipData }], note: `${roms.length} patches applied` };
+}
 
-  const promises = [];
-  for (let i = 0; i < pairCount; i++) {
-    const rom = patchRomFiles[i];
-    const patch = patchPatchFiles[i];
-    const p = applyPair(rom, patch, (pct, label) => {
-      perPairPct[i] = pct;
-      perPairLabel[i] = label;
-      updateOverallProgress();
-    });
-    promises.push(p);
-  }
+patchApplyBtn.addEventListener('click', () => {
+  if (Math.min(patchRomFiles.length, patchPatchFiles.length) === 0) return;
+  submitJob(buildPatchJob(), patchStatus);
+});
 
-  try {
-    const results = await Promise.all(promises);
-
-    // Build ZIP entries
-    const entries = results.map((r, i) => ({
-      name: patchedName(patchRomFiles[i]),
-      data: r.result,
-    }));
-
-    showPatchProgress(70, 'Packaging ZIP...');
-    const zipData = await createZipInWorker(entries, (phase, i, total) => {
-      // CRC is ~60% of ZIP work, copy is ~40%
-      let zipPct;
-      if (phase === 'crc') zipPct = i / total * 0.6;
-      else if (phase === 'alloc') zipPct = 0.6;
-      else zipPct = 0.6 + (i + 1) / total * 0.4;
-      const scaled = 70 + Math.round(zipPct * 30);
-      const step = phase === 'crc' ? 'Checksumming' : phase === 'alloc' ? 'Allocating' : 'Copying';
-      showPatchProgress(scaled, `Packaging ZIP \u2014 ${step} file ${i + 1}/${total}...`);
-    });
-
-    // Dereference individual results
-    for (const r of results) r.result = null;
-
-    const baseName = patchRomFiles[0].name.replace(/\.[^.]+$/, '').replace(/\s*\(.*?\)\s*/g, ' ').trim();
-    const zipName = baseName + ' (patched).zip';
-    download(zipData, zipName);
-
-    hidePatchProgress();
-    patchStatus.textContent = `Done — ${pairCount} patches applied. Saved as ${zipName}`;
-  } catch (err) {
-    patchStatus.textContent = `Error: ${err.message}`;
-    patchStatus.className = 'status error';
-    hidePatchProgress();
-  }
-
-  patchApplyBtn.disabled = false;
-  patchClearBtn.style.display = '';
+registerJobSource('patch', {
+  tabId: 'patch',
+  tabName: 'Patch',
+  restore({ roms, patches }) {
+    patchRomFiles = roms.slice();
+    patchPatchFiles = patches.slice();
+    patchStatus.textContent = '';
+    patchStatus.className = 'status';
+    updatePatchStaged();
+  },
+  setEditing(editing) {
+    patchApplyBtn.textContent = editing ? 'Save changes' : 'Apply Patch';
+  },
+  // A drop adds to the staged files, so empty them for the next set.
+  clearAfterAdd() {
+    patchRomFiles = [];
+    patchPatchFiles = [];
+    updatePatchStaged();
+  },
 });

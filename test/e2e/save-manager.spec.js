@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { expectSaved } from './queue-helpers.js';
 import { parseMcr, MCR_SIZE } from '../../save/mcr.js';
 import { stripGmeHeader, GME_HEADER_SIZE } from '../../save/gme.js';
 
@@ -87,7 +88,7 @@ test('single save: extract downloads one valid .vmp', async ({ page }) => {
     page.locator('[data-testid="save-extract-btn"]').click(),
   ]);
 
-  await expect(page.locator('[data-testid="save-status"]')).toContainText('Done', { timeout: 10000 });
+  await expectSaved(page, download.suggestedFilename());
   expect(download.suggestedFilename()).toMatch(/SLUS99999.*SCEVMC0\.VMP$/);
 
   const vmpBytes = new Uint8Array(fs.readFileSync(await download.path()));
@@ -105,7 +106,7 @@ test('multiple saves: extract downloads a ZIP with both saves at the correct POP
     page.locator('[data-testid="save-extract-btn"]').click(),
   ]);
 
-  await expect(page.locator('[data-testid="save-status"]')).toContainText('2 saves extracted', { timeout: 10000 });
+  await expectSaved(page, '2 saves extracted');
   expect(download.suggestedFilename()).toMatch(/\.zip$/);
 
   const zipBytes = new Uint8Array(fs.readFileSync(await download.path()));
@@ -136,7 +137,8 @@ test('mobile viewport: drop, select, and extract remain usable', async ({ page }
     page.locator('[data-testid="save-extract-btn"]').click(),
   ]);
 
-  await expect(page.locator('[data-testid="save-status"]')).toContainText('extracted', { timeout: 10000 });
+  // On a phone the tray starts folded: its one-line summary reports the result.
+  await expect(page.locator('[data-testid="queue-toggle"]')).toContainText('All done', { timeout: 10000 });
   expect(download.suggestedFilename()).toMatch(/\.zip$/);
 });
 
@@ -167,7 +169,7 @@ test('single save: export to MCR downloads a valid raw memory card', async ({ pa
     page.locator('[data-testid="save-extract-btn"]').click(),
   ]);
 
-  await expect(page.locator('[data-testid="save-status"]')).toContainText('Done', { timeout: 10000 });
+  await expectSaved(page, download.suggestedFilename());
   expect(download.suggestedFilename()).toMatch(/SLUS99999\.mcr$/);
 
   const mcrBytes = new Uint8Array(fs.readFileSync(await download.path()));
@@ -191,7 +193,7 @@ test('single save: export to GME downloads a valid DexDrive file', async ({ page
     page.locator('[data-testid="save-extract-btn"]').click(),
   ]);
 
-  await expect(page.locator('[data-testid="save-status"]')).toContainText('Done', { timeout: 10000 });
+  await expectSaved(page, download.suggestedFilename());
   expect(download.suggestedFilename()).toMatch(/SLUS99999\.gme$/);
 
   const gmeBytes = new Uint8Array(fs.readFileSync(await download.path()));
@@ -213,7 +215,7 @@ test('multiple saves: export downloads a ZIP of individual .mcr files', async ({
     page.locator('[data-testid="save-extract-btn"]').click(),
   ]);
 
-  await expect(page.locator('[data-testid="save-status"]')).toContainText('2 saves exported', { timeout: 10000 });
+  await expectSaved(page, '2 saves exported');
   expect(download.suggestedFilename()).toMatch(/\.zip$/);
 
   const zipBytes = new Uint8Array(fs.readFileSync(await download.path()));
@@ -242,6 +244,6 @@ test('mobile viewport: VMP export flow remains usable', async ({ page }) => {
     page.locator('[data-testid="save-extract-btn"]').click(),
   ]);
 
-  await expect(page.locator('[data-testid="save-status"]')).toContainText('exported', { timeout: 10000 });
+  await expect(page.locator('[data-testid="queue-toggle"]')).toContainText('All done', { timeout: 10000 });
   expect(download.suggestedFilename()).toMatch(/\.zip$/);
 });

@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { expectSaved } from './queue-helpers.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const FIXTURES = path.join(ROOT, 'test', 'fixtures');
@@ -73,7 +74,7 @@ test('Multi-disc BIN drop → build EBOOT → download ZIP', async ({ page }) =>
   ]);
 
   // Wait for completion
-  await expect(page.locator('[data-testid="eboot-status"]')).toContainText('Done', { timeout: 60000 });
+  await expectSaved(page, 'SLUS00001.zip');
   await waitForArtwork(page);
   await expect(page).toHaveScreenshot('eboot-multi-disc-build-done.png');
 
@@ -131,17 +132,21 @@ test('The file picker offers .iso discs, as dropping does', async ({ page }) => 
 
 test('Building with 2 workers produces the same EBOOT as with 1', async ({ page }) => {
   const input = page.locator('[data-testid="eboot-file-input"]');
-  await input.setInputFiles([path.join(FIXTURES, 'ps1-disc1.bin')]);
-  await expect(page.locator('[data-testid="eboot-disc-id"]')).not.toHaveValue('', { timeout: 5000 });
-  await expect(page.locator('#artIcon0')).toHaveAttribute('src', /.+/, { timeout: 5000 });
 
+  let builds = 0;
   async function buildWith(workers) {
+    // The tab empties once a build is queued, so drop the disc each time.
+    await input.setInputFiles([path.join(FIXTURES, 'ps1-disc1.bin')]);
+    await expect(page.locator('[data-testid="eboot-disc-id"]')).not.toHaveValue('', { timeout: 5000 });
+    await expect(page.locator('#artIcon0')).toHaveAttribute('src', /.+/, { timeout: 5000 });
     await page.locator('#ebootThreads').fill(String(workers));
     const [download] = await Promise.all([
       page.waitForEvent('download', { timeout: 60000 }),
       page.locator('[data-testid="eboot-build-btn"]').click(),
     ]);
-    await expect(page.locator('[data-testid="eboot-build-btn"]')).toBeEnabled({ timeout: 60000 });
+    // The same discs can be queued again only once the earlier build has finished.
+    builds++;
+    await expect(page.locator('[data-testid="queue-finished"][data-state="done"]')).toHaveCount(builds, { timeout: 60000 });
     return fs.readFileSync(await download.path());
   }
 
@@ -177,7 +182,7 @@ test('Single disc with CUE+BIN → build EBOOT', async ({ page }) => {
     buildBtn.click(),
   ]);
 
-  await expect(page.locator('[data-testid="eboot-status"]')).toContainText('Done', { timeout: 60000 });
+  await expectSaved(page, 'SLUS00001.zip');
   await waitForArtwork(page);
   await expect(page).toHaveScreenshot('eboot-cue-bin-build-done.png');
 

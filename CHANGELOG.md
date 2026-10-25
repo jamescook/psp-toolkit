@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Job queue: Convert, EBOOT, Patch and Save Manager jobs line up (up to 10) and run one after another, each file saved as soon as its job finishes. A tray along the bottom shows progress; waiting jobs can be edited or removed and the running one cancelled. Adding the same job twice does nothing
+- Chrome and Edge: choose a folder once and every finished file is written straight into it, instead of downloading
+
 ### Fixed
 
 - Safari: converting, building an EBOOT, and patching work in the offline `index.html` opened from disk (they failed with "The I/O read operation failed")

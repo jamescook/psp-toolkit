@@ -1,8 +1,9 @@
 // ══════════════════════════════════════════════════════════════════════════════
 // CONVERT TAB — CSO/ZSO/ISO disc image conversion
 //
-// Handles the "Convert" tab UI: drop zone, format detection, action buttons,
-// progress display, and download. Conversion runs in worker.js off-thread.
+// Handles the "Convert" tab UI: drop zone, format detection and action buttons.
+// Each button adds a conversion job to the queue (queue-tray.js), which shows
+// its progress and saves the result. Conversion runs in worker.js off-thread.
 // ISO→CSO/ZSO compression supports parallel workers for multi-core speedup.
 // ══════════════════════════════════════════════════════════════════════════════
 
@@ -15,16 +16,11 @@ const convertActions = document.getElementById('convertActions');
 const convertOpts = document.getElementById('convertOpts');
 const convertThreads = document.getElementById('convertThreads');
 const convertThreadsVal = document.getElementById('convertThreadsVal');
-const convertProgressArea = document.getElementById('convertProgressArea');
-const convertProgressFill = document.getElementById('convertProgressFill');
-const convertProgressLabel = document.getElementById('convertProgressLabel');
-const convertProgressPct = document.getElementById('convertProgressPct');
 const convertStatus = document.getElementById('convertStatus');
 
 let convertFile = null;
 let convertFormat = null;
-let convertWorking = false;
-let convertActiveWorkers = [];
+let convertEditing = false; // a queued job is loaded back into the tab to edit
 
 convertThreadsVal.textContent = convertThreads.value;
 convertThreads.addEventListener('input', () => {
@@ -45,7 +41,6 @@ convertFileInput.addEventListener('change', () => {
 });
 
 async function handleConvertDrop(fileList) {
-  if (convertWorking) return;
   const file = fileList[0];
   convertFile = file;
   const format = await detectConvertFormat(file);
@@ -54,7 +49,6 @@ async function handleConvertDrop(fileList) {
   // Reset
   convertStatus.textContent = '';
   convertStatus.className = 'status';
-  convertProgressArea.style.display = 'none';
 
   // Show file info
   convertFileName.textContent = file.name;
@@ -72,30 +66,31 @@ async function handleConvertDrop(fileList) {
   // Show Workers slider only for ISO sources (compression is CPU-bound)
   convertOpts.style.display = format === 'ISO' ? 'block' : 'none';
 
-  // Build action buttons
+  renderConvertActions();
+}
+
+/** One button per format the loaded file can become; while editing a queued job they save the change. */
+function renderConvertActions() {
   convertActions.innerHTML = '';
-  const targets = ['ISO', 'CSO', 'ZSO'].filter(f => f !== format);
+  if (!convertFile) return;
+  const targets = ['ISO', 'CSO', 'ZSO'].filter(f => f !== convertFormat);
   for (const t of targets) {
     const btn = document.createElement('button');
     btn.className = 'btn-' + t.toLowerCase();
     btn.dataset.testid = `convert-to-${t.toLowerCase()}`;
-    btn.textContent = `Convert to ${t}`;
-    btn.addEventListener('click', () => startCsoConversion(t));
+    btn.textContent = convertEditing ? `Save changes: to ${t}` : `Convert to ${t}`;
+    btn.addEventListener('click', () => {
+      const job = buildConvertJob(convertFile, convertFormat, t, parseInt(convertThreads.value, 10));
+      submitJob(job, convertStatus);
+    });
     convertActions.appendChild(btn);
   }
   convertActions.style.display = 'flex';
 }
 
-function showConvertProgress(pct, label) {
-  const p = Math.round(pct * 100);
-  convertProgressFill.style.width = p + '%';
-  convertProgressPct.textContent = p + '%';
-  convertProgressLabel.textContent = label;
-}
-
 // ── Parallel ISO→CSO/ZSO compression ─────────────────────────────────────────
 
-async function compressISOParallel(file, targetFormat, numThreads, onProgress) {
+async function compressISOParallel(file, targetFormat, numThreads, onProgress, signal) {
   const BLOCK_SIZE = 2048;
   const isoSize = file.size;
   const totalBlocks = Math.ceil(isoSize / BLOCK_SIZE);
@@ -108,18 +103,15 @@ async function compressISOParallel(file, targetFormat, numThreads, onProgress) {
     const end = Math.min(start + BLOCK_SIZE, isoSize);
     allBlocks.push(await file.slice(start, end).arrayBuffer());
     if (i % 512 === 0) {
+      if (signal?.aborted) throw createCancelledError();
       onProgress(i / totalBlocks * 0.2, `Reading block ${i}/${totalBlocks}`);
     }
   }
 
   onProgress(0.2, 'Compressing...');
 
-  const createWorker = () => {
-    const worker = new Worker('cso-compress-worker.js');
-    convertActiveWorkers.push(worker);
-    return worker;
-  };
-  const doneMessages = await runWorkerPool(createWorker, allBlocks, numThreads, {
+  const doneMessages = await runWorkerPool(() => new Worker('cso-compress-worker.js'), allBlocks, numThreads, {
+    signal,
     message: (blocks) => ({ blocks, targetFormat }),
     transfer: (blocks) => blocks.slice(),
     onProgress: (fraction, workerCount) => {
@@ -131,7 +123,6 @@ async function compressISOParallel(file, targetFormat, numThreads, onProgress) {
     uncompressedFlags: done.uncompressedFlags,
   }));
 
-  convertActiveWorkers = [];
   onProgress(0.9, 'Building output file...');
 
   // Stitch: header + index + compressed parts
@@ -179,67 +170,44 @@ async function compressISOParallel(file, targetFormat, numThreads, onProgress) {
   return result;
 }
 
-// ── Conversion entry point ────────────────────────────────────────────────────
+// ── Jobs ─────────────────────────────────────────────────────────────────────
+// A conversion is a queue job (queue-tray.js): its settings are captured
+// when it is added, so the tab is free for the next file while it waits.
 
-function startCsoConversion(targetFormat) {
-  if (convertWorking) return;
-  convertWorking = true;
-  for (const btn of convertActions.querySelectorAll('button')) btn.disabled = true;
-  convertThreads.disabled = true;
-  convertProgressArea.style.display = 'block';
-  showConvertProgress(0, 'Starting...');
-  convertStatus.textContent = '';
-  convertStatus.className = 'status';
-
-  const baseName = convertFile.name.replace(/\.[^.]+$/, '');
-  const ext = targetFormat.toLowerCase();
-  const t0 = performance.now();
-  const numThreads = parseInt(convertThreads.value, 10);
-
-  // Use parallel path for ISO→CSO/ZSO with multiple threads
-  if (convertFormat === 'ISO' && numThreads > 1) {
-    startParallelConversion(targetFormat, baseName, ext, t0, numThreads);
-    return;
-  }
-
-  // Single-worker path (decompression, transcompression, or single-thread compression)
-  startSingleConversion(targetFormat, baseName, ext, t0);
+function buildConvertJob(file, sourceFormat, targetFormat, numThreads) {
+  return {
+    kind: 'convert',
+    key: `convert|${fingerprintFile(file)}|${targetFormat}`,
+    label: file.name,
+    detail: `Convert to ${targetFormat}`,
+    settings: { file, sourceFormat, targetFormat, numThreads },
+    run: runConvertJob,
+  };
 }
 
-async function startSingleConversion(targetFormat, baseName, ext, t0) {
-  try {
-    const done = await runWorker(new Worker('worker.js'), { file: convertFile, sourceFormat: convertFormat, targetFormat }, {
-      onProgress: (msg) => showConvertProgress(msg.pct, msg.label),
-    });
-    const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
-    const filename = `${baseName}.${ext}`;
-    download(done.result, filename);
-    convertStatus.textContent = `Done in ${elapsed}s \u2014 ${formatSize(done.result.length)} saved as ${filename}`;
-    showConvertProgress(1, 'Complete');
-  } catch (err) {
-    // A crash's message already reads "Worker error: ..."
-    convertStatus.textContent = err.workerMessage ? `Error: ${err.message}` : err.message;
-    convertStatus.className = 'status error';
+async function runConvertJob({ file, sourceFormat, targetFormat, numThreads }, { onProgress, signal }) {
+  const name = `${file.name.replace(/\.[^.]+$/, '')}.${targetFormat.toLowerCase()}`;
+  // ISO to CSO/ZSO can spread compression across workers; the rest is one worker's job.
+  if (sourceFormat === 'ISO' && numThreads > 1) {
+    return [{ name, data: await compressISOParallel(file, targetFormat, numThreads, onProgress, signal) }];
   }
-  convertWorking = false;
-  for (const btn of convertActions.querySelectorAll('button')) btn.disabled = false;
-  convertThreads.disabled = false;
+  const done = await runWorker(new Worker('worker.js'), { file, sourceFormat, targetFormat }, {
+    signal,
+    onProgress: (msg) => onProgress(msg.pct, msg.label),
+  });
+  return [{ name, data: done.result }];
 }
 
-async function startParallelConversion(targetFormat, baseName, ext, t0, numThreads) {
-  try {
-    const result = await compressISOParallel(convertFile, targetFormat, numThreads, showConvertProgress);
-    const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
-    const filename = `${baseName}.${ext}`;
-    download(result, filename);
-    convertStatus.textContent = `Done in ${elapsed}s \u2014 ${formatSize(result.length)} saved as ${filename}`;
-    showConvertProgress(1, 'Complete');
-  } catch (err) {
-    convertStatus.textContent = `Error: ${err.message}`;
-    convertStatus.className = 'status error';
-  }
-  convertWorking = false;
-  for (const btn of convertActions.querySelectorAll('button')) btn.disabled = false;
-  convertThreads.disabled = false;
-  convertActiveWorkers = [];
-}
+registerJobSource('convert', {
+  tabId: 'convert',
+  tabName: 'Convert',
+  async restore({ file, numThreads }) {
+    await handleConvertDrop([file]);
+    convertThreads.value = numThreads;
+    convertThreadsVal.textContent = numThreads;
+  },
+  setEditing(editing) {
+    convertEditing = editing;
+    renderConvertActions();
+  },
+});

@@ -43,6 +43,13 @@ BIN/ISO, CUE, every patch format above, and GME/MCR/VMP memory cards (each
 save's product code, and whether a VMP's signature is valid). Unknown files
 get a hex dump.
 
+### Queue
+Line up to 10 jobs from any tab — several discs to convert, EBOOTs to build,
+patches to apply — and they run one after another while you set up the next.
+Each file is saved as soon as its job finishes. A tray along the bottom shows
+progress; edit or remove a waiting job, or cancel the running one. In Chrome
+and Edge you can pick a folder once and every file is written straight into it.
+
 ## Usage
 
 Just open **[jamescook.github.io/psp-toolkit](https://jamescook.github.io/psp-toolkit/)**.
@@ -90,10 +97,14 @@ build.js                — Produces dist/index.html (single-file build, workers
   patch-worker.js       —   applying patches
   save-worker.js        —   packaging one save as VMP/MCR/GME
   zip-worker.js         —   building download ZIPs
+remote-file.js          — Lets a worker read a dropped file through the page (Safari offline)
 Dockerfile.test         — Docker image for CI/E2E tests
 playwright.config.js    — Playwright E2E config
 ui/                     — One script per tab, plus shared helpers (plain globals, no modules)
   run-worker.js         — Runs a job on a worker, or across a pool of them
+  job-queue.js          — The queue: one job at a time, duplicates ignored, editable while waiting
+  queue-tray.js         — The queue tray along the bottom, and how tabs hand it jobs
+  save-output.js        — Saves finished files into a chosen folder, or downloads them
   shared.js             — Shared utilities, disc detection, CUE parsing, tab switching
   convert.js            — Convert tab
   eboot-ui.js           — EBOOT tab

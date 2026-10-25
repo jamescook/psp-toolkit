@@ -10,10 +10,10 @@
 // stripGmeHeader() and save/mcr.js's parseMcr() locally rather than importing
 // them, because ui/*.js files are plain concatenated scripts, not ES modules
 // (see ui/shared.js's autoDetectDiscId for the same tradeoff, spelled out
-// there). Packaging (isolating a save + signing/wrapping it) runs in
-// save-worker.js, one worker per selected slot, following the same
-// off-main-thread pattern as convert/eboot/patch even though a single 128KB
-// card is fast enough not to strictly need it.
+// there). Packaging (isolating a save + signing/wrapping it) is a queue job
+// (queue-tray.js) that runs in save-worker.js, one worker per selected slot,
+// following the same off-main-thread pattern as convert/eboot/patch even
+// though a single 128KB card is fast enough not to strictly need it.
 // ══════════════════════════════════════════════════════════════════════════════
 
 const saveDropZone = document.getElementById('saveDropZone');
@@ -27,17 +27,15 @@ const saveSlotCount = document.getElementById('saveSlotCount');
 const saveSlotList = document.getElementById('saveSlotList');
 const saveExportFormat = document.getElementById('saveExportFormat');
 const saveExtractBtn = document.getElementById('saveExtractBtn');
-const saveProgressArea = document.getElementById('saveProgressArea');
-const saveProgressFill = document.getElementById('saveProgressFill');
-const saveProgressLabel = document.getElementById('saveProgressLabel');
-const saveProgressPct = document.getElementById('saveProgressPct');
 const saveStatus = document.getElementById('saveStatus');
 const saveInfoBox = document.getElementById('saveInfoBox');
 
 let currentMcr = null;   // Uint8Array — the current card, container header already stripped
 let currentSlots = [];   // parsed 'initial' slots (one row per real save)
+let currentSourceFile = null; // the dropped card file, kept so a queued job can be edited
 let currentSourceName = '';
 let currentMode = 'vmp'; // 'vmp' (GME/MCR in -> VMP out) or 'export' (VMP in -> MCR/GME out)
+let saveEditing = false; // a queued job is loaded back into the tab to edit
 
 // ── Duplicated read-only logic (see file header for why) ────────────────────
 
@@ -154,6 +152,7 @@ async function handleSaveDrop(file) {
 
     currentMcr = mcr;
     currentSlots = slots;
+    currentSourceFile = file;
     currentSourceName = file.name.replace(/\.[^.]+$/, '');
     currentMode = kind === 'vmp' ? 'export' : 'vmp';
 
@@ -231,7 +230,9 @@ function updateSelectionState() {
   const n = selectedSlots().length;
 
   saveExtractBtn.disabled = n === 0;
-  if (n > 1) {
+  if (saveEditing) {
+    saveExtractBtn.textContent = 'Save changes';
+  } else if (n > 1) {
     saveExtractBtn.textContent = currentMode === 'export' ? `Export ${n} Saves (ZIP)` : `Extract ${n} Saves (ZIP)`;
   } else if (currentMode === 'export') {
     saveExtractBtn.textContent = `Export to ${selectedExportFormat().toUpperCase()}`;
@@ -251,18 +252,7 @@ saveSelectAllBtn.addEventListener('click', () => {
 
 saveExportFormat.addEventListener('change', updateSelectionState);
 
-// ── Progress helpers ─────────────────────────────────────────────────────────
-
-function showSaveProgress(pct, label) {
-  saveProgressArea.style.display = 'block';
-  saveProgressFill.style.width = pct + '%';
-  saveProgressPct.textContent = pct + '%';
-  saveProgressLabel.textContent = label;
-}
-
-function hideSaveProgress() {
-  saveProgressArea.style.display = 'none';
-}
+// ── Info box ─────────────────────────────────────────────────────────────────
 
 function showSaveInfoBox(title, items) {
   saveInfoBox.innerHTML = `<span class="save-info-title">${title}</span><ul>${items.map(i => `<li>${i}</li>`).join('')}</ul>`;
@@ -273,27 +263,35 @@ function hideSaveInfoBox() {
   saveInfoBox.style.display = 'none';
 }
 
-// ── Extraction / export ──────────────────────────────────────────────────────
+// ── Extraction / export jobs ─────────────────────────────────────────────────
+// Extracting or exporting is a queue job (queue-tray.js). It captures the
+// card, the ticked saves and the format when added, so the tab is free for
+// the next card; Edit drops the same card back in with the same choices.
 
-async function packageSlot(mcr, slotIndex, format, onProgress) {
+async function packageSlot(mcr, slotIndex, format, onProgress, signal) {
   const message = { mcr: mcr.buffer.slice(mcr.byteOffset, mcr.byteOffset + mcr.byteLength), slotIndex, format };
   const done = await runWorker(new Worker('save-worker.js'), message, {
+    signal,
     onProgress: (msg) => onProgress?.(msg.pct, msg.label),
   });
   return new Uint8Array(done.result);
 }
 
-saveExtractBtn.addEventListener('click', async () => {
+function buildSaveJob() {
   const slots = selectedSlots();
-  if (slots.length === 0) return;
-
   const format = currentMode === 'export' ? selectedExportFormat() : 'vmp';
+  const verb = format === 'vmp' ? 'Extract' : 'Export';
+  return {
+    kind: 'save',
+    key: `save|${fingerprintFile(currentSourceFile)}|${slots.map(s => s.index).join(',')}|${format}`,
+    label: currentSourceFile.name,
+    detail: `${verb} ${slots.length === 1 ? '1 save' : `${slots.length} saves`} to ${format.toUpperCase()}`,
+    settings: { sourceFile: currentSourceFile, mcr: currentMcr, sourceName: currentSourceName, slots, format },
+    run: runSaveJob,
+  };
+}
 
-  saveExtractBtn.disabled = true;
-  saveStatus.textContent = '';
-  saveStatus.className = 'status';
-  showSaveProgress(0, 'Starting...');
-
+async function runSaveJob({ mcr, sourceName, slots, format }, { onProgress, signal }) {
   const folderCounts = new Map();
   function nextOutputName(slot) {
     const folder = gameFolderName(slot);
@@ -305,53 +303,54 @@ saveExtractBtn.addEventListener('click', async () => {
     return { entryName: flatName, singleName: flatName };
   }
 
+  // The save worker reports 0-100; the queue wants 0-1.
   if (slots.length === 1) {
-    try {
-      const data = await packageSlot(currentMcr, slots[0].index, format, showSaveProgress);
-      const { singleName } = nextOutputName(slots[0]);
-      download(data, singleName);
-      hideSaveProgress();
-      saveStatus.textContent = format === 'vmp'
-        ? `Done — saved as ${singleName} (rename to SCEVMC0.VMP for PSP/SAVEDATA/${gameFolderName(slots[0])}/)`
-        : `Done — saved as ${singleName}`;
-    } catch (err) {
-      saveStatus.textContent = `Error: ${err.message}`;
-      saveStatus.className = 'status error';
-      hideSaveProgress();
-    }
-    updateSelectionState();
-    return;
+    const data = await packageSlot(mcr, slots[0].index, format, pct => onProgress(pct / 100), signal);
+    const { singleName } = nextOutputName(slots[0]);
+    const note = format === 'vmp' ? `rename to SCEVMC0.VMP in PSP/SAVEDATA/${gameFolderName(slots[0])}/` : undefined;
+    return { outputs: [{ name: singleName, data }], note };
   }
 
   const perSlotPct = new Array(slots.length).fill(0);
-  function updateOverall() {
-    const avg = perSlotPct.reduce((a, b) => a + b, 0) / slots.length;
-    showSaveProgress(Math.round(avg * 0.8), `Packaging ${slots.length} saves...`);
-  }
+  const results = await Promise.all(slots.map((slot, i) =>
+    packageSlot(mcr, slot.index, format, pct => {
+      perSlotPct[i] = pct;
+      onProgress(perSlotPct.reduce((a, b) => a + b, 0) / slots.length / 100 * 0.8, `Packaging ${slots.length} saves...`);
+    }, signal)
+  ));
 
-  try {
-    const results = await Promise.all(slots.map((slot, i) =>
-      packageSlot(currentMcr, slot.index, format, pct => { perSlotPct[i] = pct; updateOverall(); })
-    ));
+  const entries = slots.map((slot, i) => ({ name: nextOutputName(slot).entryName, data: results[i] }));
+  onProgress(0.8, 'Packaging ZIP...');
+  const zipData = await createZipInWorker(entries, (phase, i, total) => {
+    const zipPct = measureZipProgress(phase, i, total);
+    onProgress(0.8 + zipPct * 0.2, 'Packaging ZIP...');
+  }, signal);
 
-    const entries = slots.map((slot, i) => ({ name: nextOutputName(slot).entryName, data: results[i] }));
+  const verb = format === 'vmp' ? 'extracted' : 'exported';
+  return {
+    outputs: [{ name: `${sourceName} (${format === 'vmp' ? 'saves' : 'export'}).zip`, data: zipData }],
+    note: `${slots.length} saves ${verb}`,
+  };
+}
 
-    showSaveProgress(80, 'Packaging ZIP...');
-    const zipData = await createZipInWorker(entries, (phase, i, total) => {
-      const zipPct = phase === 'crc' ? i / total * 0.6 : phase === 'alloc' ? 0.6 : 0.6 + (i + 1) / total * 0.4;
-      showSaveProgress(80 + Math.round(zipPct * 20), `Packaging ZIP...`);
-    });
+saveExtractBtn.addEventListener('click', () => {
+  if (selectedSlots().length === 0) return;
+  submitJob(buildSaveJob(), saveStatus);
+});
 
-    const zipName = `${currentSourceName} (${format === 'vmp' ? 'saves' : 'export'}).zip`;
-    download(zipData, zipName);
-    hideSaveProgress();
-    const verb = format === 'vmp' ? 'extracted' : 'exported';
-    saveStatus.textContent = `Done — ${slots.length} saves ${verb}. Saved as ${zipName}`;
-  } catch (err) {
-    saveStatus.textContent = `Error: ${err.message}`;
-    saveStatus.className = 'status error';
-    hideSaveProgress();
-  }
-
-  updateSelectionState();
+registerJobSource('save', {
+  tabId: 'save',
+  tabName: 'Save Manager',
+  async restore({ sourceFile, slots, format }) {
+    await handleSaveDrop(sourceFile);
+    const wanted = new Set(slots.map(s => s.index));
+    for (const cb of allCheckboxes()) cb.checked = wanted.has(Number(cb.dataset.slotIndex));
+    const radio = saveExportFormat.querySelector(`input[name="saveExportFormat"][value="${format}"]`);
+    if (radio) radio.checked = true;
+    updateSelectionState();
+  },
+  setEditing(editing) {
+    saveEditing = editing;
+    updateSelectionState();
+  },
 });

@@ -38,6 +38,14 @@ and every local run passes while CI fails, because CI builds inside that image.
 Heavy work (compression, hashing, patching) runs in a Web Worker. Files can be over 1 GB: stream
 or work in blocks, never hold a whole disc image in one buffer twice.
 
+A tab's main button never runs work itself: it builds a job from the form (`settings` captured
+then, a `key` that is equal for the same work on the same files, and `run(settings, { onProgress,
+signal })` returning the files to save) and calls `submitJob()` in `ui/queue-tray.js`. `run` must
+read only `settings`, never the form, because the job may run after the form has moved on, and
+must pass `signal` to every worker so Cancel stops it. A tab also calls `registerJobSource()` so
+Edit can put a waiting job's settings back into its form. Diagnose produces no file and stays
+out of the queue.
+
 ## Shell commands — one operation per call
 
 Run **one logical command per Bash call.** Do not chain distinct operations with `&&`, `;` or

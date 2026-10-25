@@ -2,15 +2,16 @@
 // EBOOT TAB — PS1 disc image → EBOOT.PBP builder
 //
 // Handles the "EBOOT" tab UI: disc image drop zone, multi-disc management,
-// CUE/BIN pairing, game title/disc ID detection, artwork previews, compression
-// settings, parallel worker dispatch, progress display, and ZIP download.
+// CUE/BIN pairing, game title/disc ID detection, artwork previews and
+// compression settings. Build adds a job to the queue (queue-tray.js), which
+// shows its progress and saves the ZIP.
 //
-// Build pipeline:
+// Build pipeline (runEbootJob):
 //   1. User drops BIN/ISO/CUE files → auto-detect disc ID and title
 //   2. Read disc images into ISO_BLOCK_SIZE chunks
 //   3. Dispatch chunks to compress-worker.js instances (parallel deflate)
 //   4. Send compressed data to eboot-worker.js (assembles PBP)
-//   5. Download result as EBOOT.PBP inside a ZIP
+//   5. Save the result as EBOOT.PBP inside a ZIP
 // ══════════════════════════════════════════════════════════════════════════════
 
 const ebootDropZone = document.getElementById('ebootDropZone');
@@ -30,10 +31,6 @@ const ebootCompressionLabel = document.getElementById('ebootCompressionLabel');
 const ebootThreads = document.getElementById('ebootThreads');
 const ebootThreadsVal = document.getElementById('ebootThreadsVal');
 const discIdDetected = document.getElementById('discIdDetected');
-const ebootProgressArea = document.getElementById('ebootProgressArea');
-const ebootProgressFill = document.getElementById('ebootProgressFill');
-const ebootProgressLabel = document.getElementById('ebootProgressLabel');
-const ebootProgressPct = document.getElementById('ebootProgressPct');
 const ebootStatusEl = document.getElementById('ebootStatus');
 const artIcon0 = document.getElementById('artIcon0');
 const artPic0 = document.getElementById('artPic0');
@@ -41,10 +38,7 @@ const artPic1 = document.getElementById('artPic1');
 
 let ebootFiles = [];
 let pendingCues = [];
-let ebootWorking = false;
-let ebootActiveWorker = null;
-let ebootActiveCompressWorkers = [];
-const ebootCancelBtn = document.getElementById('ebootCancelBtn');
+let ebootEditing = false; // a queued job is loaded back into the tab to edit
 
 const ebootParentalLevel = document.getElementById('ebootParentalLevel');
 const ebootRegion = document.getElementById('ebootRegion');
@@ -57,33 +51,8 @@ ebootFetchArt.addEventListener('change', () => {
   scheduleArtworkRegenerate();
 });
 
-// Elements to disable during build
+// The settings a PSP game locks (refusePspGame)
 const ebootInputs = [ebootTitle, ebootDiscId, ebootCompression, ebootThreads, ebootParentalLevel, ebootRegion, ebootFetchArt];
-
-function setEbootInputsDisabled(disabled) {
-  for (const el of ebootInputs) el.disabled = disabled;
-  ebootDropZone.style.pointerEvents = disabled ? 'none' : '';
-  ebootDropZone.style.opacity = disabled ? '0.5' : '';
-  if (discListEl) {
-    discListEl.style.pointerEvents = disabled ? 'none' : '';
-    discListEl.style.opacity = disabled ? '0.5' : '';
-  }
-}
-
-ebootCancelBtn.addEventListener('click', () => {
-  if (!ebootWorking) return;
-  if (!confirm('Cancel the current build?')) return;
-  // Terminate all active workers
-  if (ebootActiveWorker) { ebootActiveWorker.terminate(); ebootActiveWorker = null; }
-  for (const w of ebootActiveCompressWorkers) w.terminate();
-  ebootActiveCompressWorkers = [];
-  ebootWorking = false;
-  setEbootInputsDisabled(false);
-  for (const btn of ebootActionsEl.querySelectorAll('button')) btn.disabled = false;
-  ebootStatusEl.textContent = 'Build cancelled';
-  ebootStatusEl.className = 'status';
-  ebootProgressArea.style.display = 'none';
-});
 
 const compressionLabels = ['None', 'Low', 'Low', 'Medium', 'Medium', 'High', 'High', 'Very high', 'Very high', 'Maximum'];
 function updateCompressionLabel() {
@@ -169,8 +138,6 @@ ebootFileInput.addEventListener('change', () => {
 });
 
 async function handleEbootDrop(fileList) {
-  if (ebootWorking) return;
-
   const allFiles = Array.from(fileList);
   const cueFiles = allFiles.filter(f => f.name.toLowerCase().endsWith('.cue'));
   const nonCueFiles = allFiles.filter(f => !f.name.toLowerCase().endsWith('.cue'));
@@ -271,18 +238,17 @@ function resetEbootUI() {
   setEbootSettingsLocked(false);
   ebootStatusEl.textContent = '';
   ebootStatusEl.className = 'status';
-  ebootProgressArea.style.display = 'none';
   ebootOpts.style.display = 'none';
   discListEl.innerHTML = '';
   addDiscHint.style.display = 'none';
-  document.getElementById('buildLogArea').style.display = 'none';
   ebootFiles = [];
   pendingCues = [];
   icon0IsCustom = pic0IsCustom = pic1IsCustom = false;
   currentIcon0 = currentPic0 = currentPic1 = null;
-  artIcon0.src = '';
-  artPic0.src = '';
-  artPic1.src = '';
+  // removeAttribute, not src = '': an empty src makes the browser fetch the page itself as the image
+  artIcon0.removeAttribute('src');
+  artPic0.removeAttribute('src');
+  artPic1.removeAttribute('src');
   document.getElementById('artIcon0Reset').style.display = 'none';
   document.getElementById('artPic0Reset').style.display = 'none';
   document.getElementById('artPic1Reset').style.display = 'none';
@@ -293,8 +259,8 @@ function showEbootActions() {
   const ebootBtn = document.createElement('button');
   ebootBtn.className = 'btn-eboot';
   ebootBtn.dataset.testid = 'eboot-build-btn';
-  ebootBtn.textContent = 'Build EBOOT.PBP';
-  ebootBtn.addEventListener('click', startEbootBuild);
+  ebootBtn.textContent = ebootEditing ? 'Save changes' : 'Build EBOOT.PBP';
+  ebootBtn.addEventListener('click', submitEbootJob);
   ebootActionsEl.appendChild(ebootBtn);
   ebootActionsEl.style.display = 'flex';
   ebootOpts.style.display = 'block';
@@ -532,13 +498,6 @@ function renderDiscList() {
   });
 }
 
-function showEbootProgress(pct, label) {
-  const p = Math.round(pct * 100);
-  ebootProgressFill.style.width = p + '%';
-  ebootProgressPct.textContent = p + '%';
-  ebootProgressLabel.textContent = label;
-}
-
 // ── Build log formatting ─────────────────────────────────────────────────────
 function formatBuildLog(log) {
   const lines = [];
@@ -607,21 +566,19 @@ function formatBuildLog(log) {
   return lines.join('\n');
 }
 
-function showBuildLogDownload(log) {
-  const text = formatBuildLog(log);
-  const blob = new Blob([text], { type: 'text/plain' });
-  const url = URL.createObjectURL(blob);
-  const link = document.getElementById('buildLogLink');
-  link.href = url;
-  const id = ebootDiscId.value.trim() || 'SLUS00000';
-  link.download = `eboot-build-log-${id}.txt`;
-  document.getElementById('buildLogArea').style.display = 'block';
+/** The build log as a file the queue tray offers beside the job's result. */
+function attachBuildLog(log, discId) {
+  return {
+    label: 'Build log',
+    name: `eboot-build-log-${discId}.txt`,
+    data: new TextEncoder().encode(formatBuildLog(log)),
+  };
 }
 
 // ── Parallel compression ─────────────────────────────────────────────────────
 // ISO_BLOCK_SIZE (0x9300) is declared in shared.js
 
-async function compressDiscParallel(file, compressionLevel, numThreads, onProgress) {
+async function compressDiscParallel(file, compressionLevel, numThreads, onProgress, signal) {
   const fileSize = file.size;
   const totalBlocks = Math.ceil(fileSize / ISO_BLOCK_SIZE);
 
@@ -633,18 +590,15 @@ async function compressDiscParallel(file, compressionLevel, numThreads, onProgre
     const end = Math.min(start + ISO_BLOCK_SIZE, fileSize);
     allBlocks.push(new Uint8Array(await file.slice(start, end).arrayBuffer()));
     if (i % 64 === 0) {
+      if (signal?.aborted) throw createCancelledError();
       onProgress(i / totalBlocks * 0.3, `Reading block ${i}/${totalBlocks}`);
     }
   }
 
   onProgress(0.3, 'Compressing...');
 
-  const createWorker = () => {
-    const worker = new Worker('compress-worker.js');
-    ebootActiveCompressWorkers.push(worker);
-    return worker;
-  };
-  const doneMessages = await runWorkerPool(createWorker, allBlocks, numThreads, {
+  const doneMessages = await runWorkerPool(() => new Worker('compress-worker.js'), allBlocks, numThreads, {
+    signal,
     message: (blocks) => ({ blocks, compressionLevel }),
     transfer: (blocks) => blocks.map(b => b.buffer),
     onProgress: (fraction, workerCount) => {
@@ -693,25 +647,52 @@ async function compressDiscParallel(file, compressionLevel, numThreads, onProgre
   };
 }
 
-// ── EBOOT build ──────────────────────────────────────────────────────────────
-async function startEbootBuild() {
-  if (ebootWorking || !ebootFiles.length || pendingCues.length > 0) return;
+// ── Jobs ─────────────────────────────────────────────────────────────────────
+// A build is a queue job (queue-tray.js). Its settings hold everything the
+// form held when it was added — discs, fields and artwork — so the tab is free
+// for the next game, and Edit can put them all back.
 
+function buildEbootJob() {
   const title = ebootTitle.value.trim() || 'Unknown';
   const discId = ebootDiscId.value.trim() || 'SLUS00000';
-  const compressionLevel = parseInt(ebootCompression.value, 10);
-  const numThreads = parseInt(ebootThreads.value, 10);
-  const parentalLevel = parseInt(ebootParentalLevel.value, 10);
-  const region = parseInt(ebootRegion.value, 16);
+  return {
+    kind: 'eboot',
+    key: `eboot|${ebootFiles.map(e => fingerprintFile(e.file)).join('+')}`,
+    label: title,
+    detail: `EBOOT \u00b7 ${discId}${ebootFiles.length > 1 ? ` \u00b7 ${ebootFiles.length} discs` : ''}`,
+    settings: {
+      discs: ebootFiles.map(e => ({ ...e })),
+      title: ebootTitle.value,
+      discId: ebootDiscId.value,
+      discIdDetected: discIdDetected.textContent,
+      compressionLevel: parseInt(ebootCompression.value, 10),
+      numThreads: parseInt(ebootThreads.value, 10),
+      parentalLevel: parseInt(ebootParentalLevel.value, 10),
+      region: parseInt(ebootRegion.value, 16),
+      artwork: { icon0: currentIcon0, pic0: currentPic0, pic1: currentPic1, icon0IsCustom, pic0IsCustom, pic1IsCustom },
+    },
+    run: runEbootJob,
+  };
+}
 
-  const discIds = ebootFiles.map((_, i) => {
+function submitEbootJob() {
+  if (!ebootFiles.length || pendingCues.length > 0) return;
+  submitJob(buildEbootJob(), ebootStatusEl);
+}
+
+async function runEbootJob(settings, { onProgress, signal }) {
+  const title = settings.title.trim() || 'Unknown';
+  const discId = settings.discId.trim() || 'SLUS00000';
+  const { discs, compressionLevel, numThreads, parentalLevel, region, artwork } = settings;
+
+  const discIds = discs.map((_, i) => {
     if (i === 0) return discId;
     const base = discId.slice(0, -1);
     const last = parseInt(discId.slice(-1), 10);
     return base + ((last + i) % 10);
   });
 
-  const discInfo = ebootFiles.map(entry => {
+  const discInfo = discs.map(entry => {
     if (entry.cueTracks && entry.cueTracks.length > 0) {
       return {
         tracks: entry.cueTracks,
@@ -723,96 +704,106 @@ async function startEbootBuild() {
     return null;
   });
 
-  ebootWorking = true;
-  ebootActiveCompressWorkers = [];
-  for (const btn of ebootActionsEl.querySelectorAll('button')) btn.disabled = true;
-  setEbootInputsDisabled(true);
-  ebootProgressArea.style.display = 'block';
-  showEbootProgress(0, 'Starting...');
-  ebootStatusEl.textContent = '';
-  ebootStatusEl.className = 'status';
+  const files = discs.map(e => e.file);
 
-  const t0 = performance.now();
-
-  // Parallel compression: compress blocks on main thread, then send to eboot-worker for assembly
+  // Parallel compression: compress blocks here across workers, then send to eboot-worker for assembly
   let preCompressed = undefined;
   if (numThreads > 1) {
-    try {
-      preCompressed = [];
-      const files = ebootFiles.map(e => e.file);
-      for (let d = 0; d < files.length; d++) {
-        const discProgress = (pct, label) => {
-          const overall = (d + pct) / files.length;
-          showEbootProgress(overall * 0.90, `Disc ${d + 1}/${files.length}: ${label}`);
-        };
-        const result = await compressDiscParallel(files[d], compressionLevel, numThreads, discProgress);
-        preCompressed.push(result);
-      }
-    } catch (err) {
-      ebootStatusEl.textContent = `Error: ${err.message}`;
-      ebootStatusEl.className = 'status error';
-      ebootWorking = false;
-      setEbootInputsDisabled(false);
-      for (const btn of ebootActionsEl.querySelectorAll('button')) btn.disabled = false;
-      return;
+    preCompressed = [];
+    for (let d = 0; d < files.length; d++) {
+      const discProgress = (pct, label) => {
+        const overall = (d + pct) / files.length;
+        onProgress(overall * 0.90, `Disc ${d + 1}/${files.length}: ${label}`);
+      };
+      preCompressed.push(await compressDiscParallel(files[d], compressionLevel, numThreads, discProgress, signal));
     }
   }
 
-  const worker = new Worker('eboot-worker.js');
-  ebootActiveWorker = worker;
-
-  const files = ebootFiles.map(e => e.file);
-  const icon0 = currentIcon0 || undefined;
-  const pic0 = currentPic0 || undefined;
-  const pic1 = currentPic1 || undefined;
   let done;
   try {
-    done = await runWorker(worker, { files, title, discIds, compressionLevel, parentalLevel, region, discInfo, icon0, pic0, pic1, preCompressed }, {
+    done = await runWorker(new Worker('eboot-worker.js'), {
+      files, title, discIds, compressionLevel, parentalLevel, region, discInfo,
+      icon0: artwork.icon0 || undefined,
+      pic0: artwork.pic0 || undefined,
+      pic1: artwork.pic1 || undefined,
+      preCompressed,
+    }, {
+      signal,
       onProgress: (msg) => {
-        if (preCompressed) {
-          // Scale assembly progress into 90-96% (leave room for zip packaging)
-          const scaled = 0.90 + msg.pct * 0.06;
-          showEbootProgress(Math.min(scaled, 0.96), msg.label);
-        } else {
-          // Cap at 96% — zip packaging takes the remaining 4%
-          showEbootProgress(Math.min(msg.pct * 0.96, 0.96), msg.label);
-        }
+        // Assembly fills 90-96% after parallel compression, else 0-96%; the ZIP takes the rest
+        onProgress(preCompressed ? Math.min(0.90 + msg.pct * 0.06, 0.96) : Math.min(msg.pct * 0.96, 0.96), msg.label);
       },
     });
   } catch (err) {
-    // A crash's message already reads "Worker error: ..."
-    ebootStatusEl.textContent = err.workerMessage ? `Error: ${err.message}` : err.message;
-    ebootStatusEl.className = 'status error';
-    if (err.workerMessage?.buildLog) showBuildLogDownload(err.workerMessage.buildLog);
-    finishEbootBuild();
-    return;
+    if (err.workerMessage?.buildLog) err.attachments = [attachBuildLog(err.workerMessage.buildLog, discId)];
+    throw err;
   }
 
-  showEbootProgress(0.97, 'Packaging ZIP...');
-  const ebootResult = new Uint8Array(done.result);
-  const ebootSize = ebootResult.length;
-  const zipPath = discId + '/EBOOT.PBP';
-  try {
-    const zipData = await createZipInWorker([{ name: zipPath, data: ebootResult }], (phase) => {
-      const step = phase === 'crc' ? 'Checksumming' : phase === 'alloc' ? 'Allocating' : 'Copying';
-      showEbootProgress(0.97, `Packaging ZIP \u2014 ${step}...`);
-    });
-    const zipName = discId + '.zip';
-    download(zipData, zipName);
-    const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
-    ebootStatusEl.textContent = `Done in ${elapsed}s \u2014 ${formatSize(ebootSize)} saved as ${zipName}`;
-    showEbootProgress(1, 'Complete');
-    if (done.buildLog) showBuildLogDownload(done.buildLog);
-  } catch (err) {
-    ebootStatusEl.textContent = `ZIP error: ${err.message}`;
-    ebootStatusEl.className = 'status error';
-  }
-  finishEbootBuild();
+  onProgress(0.97, 'Packaging ZIP...');
+  const zipData = await createZipInWorker([{ name: discId + '/EBOOT.PBP', data: new Uint8Array(done.result) }], (phase) => {
+    const step = phase === 'crc' ? 'Checksumming' : phase === 'alloc' ? 'Allocating' : 'Copying';
+    onProgress(0.97, `Packaging ZIP: ${step}...`);
+  }, signal);
+  return {
+    outputs: [{ name: discId + '.zip', data: zipData }],
+    attachments: done.buildLog ? [attachBuildLog(done.buildLog, discId)] : [],
+  };
 }
 
-function finishEbootBuild() {
-  ebootWorking = false;
-  ebootActiveWorker = null;
-  for (const btn of ebootActionsEl.querySelectorAll('button')) btn.disabled = false;
-  setEbootInputsDisabled(false);
-}
+registerJobSource('eboot', {
+  tabId: 'eboot',
+  tabName: 'EBOOT',
+  restore(settings) {
+    resetEbootUI();
+    ebootFiles = settings.discs.map(e => ({ ...e }));
+    sortEbootFiles();
+    renderDiscList();
+    addDiscHint.textContent = 'Drop more discs to add them (up to 5)';
+    addDiscHint.style.display = 'block';
+
+    const first = ebootFiles[0].file;
+    ebootFileName.textContent = first.name;
+    ebootFileMeta.innerHTML = formatSize(first.size) + ' <span class="format-label format-ps1">PS1 Disc</span>';
+    ebootFileInfo.style.display = 'block';
+    showEbootActions();
+
+    ebootTitle.value = settings.title;
+    ebootDiscId.value = settings.discId;
+    discIdDetected.textContent = settings.discIdDetected;
+    ebootCompression.value = settings.compressionLevel;
+    updateCompressionLabel();
+    ebootThreads.value = settings.numThreads;
+    ebootThreadsVal.textContent = settings.numThreads;
+    ebootParentalLevel.value = String(settings.parentalLevel);
+    ebootRegion.value = settings.region.toString(16);
+
+    const art = settings.artwork;
+    currentIcon0 = art.icon0;
+    currentPic0 = art.pic0;
+    currentPic1 = art.pic1;
+    icon0IsCustom = art.icon0IsCustom;
+    pic0IsCustom = art.pic0IsCustom;
+    pic1IsCustom = art.pic1IsCustom;
+    for (const [img, bytes, custom, resetId] of [
+      [artIcon0, art.icon0, art.icon0IsCustom, 'artIcon0Reset'],
+      [artPic0, art.pic0, art.pic0IsCustom, 'artPic0Reset'],
+      [artPic1, art.pic1, art.pic1IsCustom, 'artPic1Reset'],
+    ]) {
+      if (bytes) img.src = URL.createObjectURL(new Blob([bytes], { type: 'image/png' }));
+      else img.removeAttribute('src');
+      document.getElementById(resetId).style.display = custom ? 'inline' : 'none';
+    }
+  },
+  setEditing(editing) {
+    ebootEditing = editing;
+    const btn = ebootActionsEl.querySelector('.btn-eboot');
+    if (btn) btn.textContent = editing ? 'Save changes' : 'Build EBOOT.PBP';
+  },
+  // A drop onto a loaded game adds discs to it, so empty the tab for the next game.
+  clearAfterAdd() {
+    resetEbootUI();
+    ebootFileInfo.style.display = 'none';
+    ebootActionsEl.innerHTML = '';
+    ebootActionsEl.style.display = 'none';
+  },
+});
