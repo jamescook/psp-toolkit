@@ -4,3 +4,12 @@ node_modules/
 vendor/zlib.browser.js
 test-results/
 playwright-report/
+
+# Claude Code: rules, hooks and settings are shared; per-machine notes and runtime state are not.
+# The negation undoes a machine-wide ignore of .claude/ that some contributors keep for other repos.
+!.claude/
+.claude/CLAUDE.local.md
+.claude/settings.local.json
+.claude/scheduled_tasks.*
+.claude/worktrees/
+.claude/checkpoints/
