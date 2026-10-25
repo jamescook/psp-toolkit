@@ -100,6 +100,11 @@ test('Multi-disc BIN drop → build EBOOT → download ZIP', async ({ page }) =>
   expect(pbpIdx).toBeGreaterThan(0);
 });
 
+test('The file picker offers .iso discs, as dropping does', async ({ page }) => {
+  const accept = await page.locator('[data-testid="eboot-file-input"]').getAttribute('accept');
+  expect(accept.split(',')).toEqual(expect.arrayContaining(['.bin', '.iso', '.cue']));
+});
+
 test('Building with 2 workers produces the same EBOOT as with 1', async ({ page }) => {
   const input = page.locator('[data-testid="eboot-file-input"]');
   await input.setInputFiles([path.join(FIXTURES, 'ps1-disc1.bin')]);

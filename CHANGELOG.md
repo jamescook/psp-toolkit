@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Safari: converting, building an EBOOT, and patching work in the offline `index.html` opened from disk (they failed with "The I/O read operation failed")
+- EBOOT tab: the file picker offers `.iso` disc images, which dropping already accepted
 
 ## [0.3.0] - 2026-10-25
 
