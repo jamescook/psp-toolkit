@@ -10,24 +10,21 @@
 // compressed parts + index entries back to the main thread.
 //
 // Message protocol:
-//   IN:  { blocks: ArrayBuffer[], compressionLevel: 0-9, rangeIndex: number }
-//   OUT: { type: 'progress', rangeIndex, blockIndex, totalBlocks }
-//   OUT: { type: 'done', rangeIndex, parts: Uint8Array[], indexEntries, stats }
-//
-// rangeIndex identifies which chunk this worker is handling, so the main
-// thread can reassemble results in order.
+//   IN:  { blocks: ArrayBuffer[], compressionLevel: 0-9 }
+//   OUT: { type: 'progress', blockIndex, totalBlocks }
+//   OUT: { type: 'done', parts: Uint8Array[], indexEntries, stats }
 
 import { compressBlocks } from './eboot/psisoimg.js';
 
 self.onmessage = function(e) {
-  const { blocks, compressionLevel, rangeIndex } = e.data;
+  const { blocks, compressionLevel } = e.data;
 
   // Convert transferred ArrayBuffers back to Uint8Arrays
   const blockArrays = blocks.map(b => new Uint8Array(b));
 
   const result = compressBlocks(blockArrays, compressionLevel, {
     onProgress(blockIndex, totalBlocks) {
-      self.postMessage({ type: 'progress', rangeIndex, blockIndex, totalBlocks });
+      self.postMessage({ type: 'progress', blockIndex, totalBlocks });
     },
   });
 
@@ -35,7 +32,6 @@ self.onmessage = function(e) {
   const transferable = result.parts.map(p => p.buffer);
   self.postMessage({
     type: 'done',
-    rangeIndex,
     parts: result.parts,
     indexEntries: result.indexEntries,
     stats: result.stats,

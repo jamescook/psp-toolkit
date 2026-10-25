@@ -113,6 +113,7 @@ let html = read('app.html');
 // UI partials (loaded in order — each may reference globals from previous ones)
 const uiPartials = [
   'ui/artwork.js',
+  'ui/run-worker.js',
   'ui/shared.js',
   'ui/artwork-fetch.js',
   'ui/convert.js',

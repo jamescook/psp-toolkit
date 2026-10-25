@@ -126,48 +126,24 @@ async function compressISOParallel(file, targetFormat, numThreads, onProgress) {
   }
 
   // Spawn workers and distribute work
-  const workerResults = new Array(ranges.length);
   const workerProgress = new Array(ranges.length).fill(0);
-  let completedWorkers = 0;
 
-  const rangeResults = await new Promise((resolve, reject) => {
-    for (let r = 0; r < ranges.length; r++) {
-      const worker = new Worker('cso-compress-worker.js');
-      convertActiveWorkers.push(worker);
-
-      worker.onmessage = function(e) {
-        const msg = e.data;
-        if (msg.type === 'progress') {
-          workerProgress[msg.rangeIndex] = msg.blockIndex / msg.totalBlocks;
-          const avgProgress = workerProgress.reduce((a, b) => a + b, 0) / ranges.length;
-          onProgress(0.2 + avgProgress * 0.7, `Compressing... (${ranges.length} workers)`);
-        } else if (msg.type === 'done') {
-          workerResults[msg.rangeIndex] = {
-            parts: msg.parts.map(p => new Uint8Array(p.buffer || p)),
-            uncompressedFlags: msg.uncompressedFlags,
-          };
-          worker.terminate();
-          completedWorkers++;
-
-          if (completedWorkers === ranges.length) {
-            resolve(workerResults);
-          }
-        }
-      };
-
-      worker.onerror = function(err) {
-        worker.terminate();
-        reject(new Error('Compression worker error: ' + (err.message || err)));
-      };
-
-      // Transfer block ArrayBuffers to the worker
-      const blockBuffers = ranges[r].slice();
-      worker.postMessage(
-        { blocks: ranges[r], targetFormat, rangeIndex: r },
-        blockBuffers
-      );
-    }
-  });
+  const rangeResults = await Promise.all(ranges.map(async (blocks, r) => {
+    const worker = new Worker('cso-compress-worker.js');
+    convertActiveWorkers.push(worker);
+    const done = await runWorker(worker, { blocks, targetFormat }, {
+      transfer: blocks.slice(),
+      onProgress: (msg) => {
+        workerProgress[r] = msg.blockIndex / msg.totalBlocks;
+        const avgProgress = workerProgress.reduce((a, b) => a + b, 0) / ranges.length;
+        onProgress(0.2 + avgProgress * 0.7, `Compressing... (${ranges.length} workers)`);
+      },
+    });
+    return {
+      parts: done.parts.map(p => new Uint8Array(p.buffer || p)),
+      uncompressedFlags: done.uncompressedFlags,
+    };
+  }));
 
   convertActiveWorkers = [];
   onProgress(0.9, 'Building output file...');
@@ -241,40 +217,27 @@ function startCsoConversion(targetFormat) {
   }
 
   // Single-worker path (decompression, transcompression, or single-thread compression)
-  const worker = new Worker('worker.js');
+  startSingleConversion(targetFormat, baseName, ext, t0);
+}
 
-  worker.onmessage = function(e) {
-    const msg = e.data;
-    if (msg.type === 'progress') {
-      showConvertProgress(msg.pct, msg.label);
-    } else if (msg.type === 'done') {
-      const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
-      const filename = `${baseName}.${ext}`;
-      download(msg.result, filename);
-      convertStatus.textContent = `Done in ${elapsed}s \u2014 ${formatSize(msg.result.length)} saved as ${filename}`;
-      showConvertProgress(1, 'Complete');
-      finish();
-    } else if (msg.type === 'error') {
-      convertStatus.textContent = `Error: ${msg.message}`;
-      convertStatus.className = 'status error';
-      finish();
-    }
-  };
-  worker.onerror = function(err) {
-    console.error('CSO worker error:', err);
-    const detail = err.message || `${err.filename}:${err.lineno} ${err.type}`;
-    convertStatus.textContent = `Worker error: ${detail}`;
+async function startSingleConversion(targetFormat, baseName, ext, t0) {
+  try {
+    const done = await runWorker(new Worker('worker.js'), { file: convertFile, sourceFormat: convertFormat, targetFormat }, {
+      onProgress: (msg) => showConvertProgress(msg.pct, msg.label),
+    });
+    const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+    const filename = `${baseName}.${ext}`;
+    download(done.result, filename);
+    convertStatus.textContent = `Done in ${elapsed}s \u2014 ${formatSize(done.result.length)} saved as ${filename}`;
+    showConvertProgress(1, 'Complete');
+  } catch (err) {
+    // A crash's message already reads "Worker error: ..."
+    convertStatus.textContent = err.workerMessage ? `Error: ${err.message}` : err.message;
     convertStatus.className = 'status error';
-    finish();
-  };
-  function finish() {
-    convertWorking = false;
-    for (const btn of convertActions.querySelectorAll('button')) btn.disabled = false;
-    convertThreads.disabled = false;
-    worker.terminate();
   }
-
-  worker.postMessage({ file: convertFile, sourceFormat: convertFormat, targetFormat });
+  convertWorking = false;
+  for (const btn of convertActions.querySelectorAll('button')) btn.disabled = false;
+  convertThreads.disabled = false;
 }
 
 async function startParallelConversion(targetFormat, baseName, ext, t0, numThreads) {

@@ -275,30 +275,12 @@ function hideSaveInfoBox() {
 
 // ── Extraction / export ──────────────────────────────────────────────────────
 
-function packageSlot(mcr, slotIndex, format, onProgress) {
-  return new Promise((resolve, reject) => {
-    const worker = new Worker('save-worker.js');
-
-    worker.onmessage = function(e) {
-      const msg = e.data;
-      if (msg.type === 'progress') {
-        onProgress?.(msg.pct, msg.label);
-      } else if (msg.type === 'done') {
-        worker.terminate();
-        resolve(new Uint8Array(msg.result));
-      } else if (msg.type === 'error') {
-        worker.terminate();
-        reject(new Error(msg.message));
-      }
-    };
-
-    worker.onerror = function(err) {
-      worker.terminate();
-      reject(new Error(err.message || String(err)));
-    };
-
-    worker.postMessage({ mcr: mcr.buffer.slice(mcr.byteOffset, mcr.byteOffset + mcr.byteLength), slotIndex, format });
+async function packageSlot(mcr, slotIndex, format, onProgress) {
+  const message = { mcr: mcr.buffer.slice(mcr.byteOffset, mcr.byteOffset + mcr.byteLength), slotIndex, format };
+  const done = await runWorker(new Worker('save-worker.js'), message, {
+    onProgress: (msg) => onProgress?.(msg.pct, msg.label),
   });
+  return new Uint8Array(done.result);
 }
 
 saveExtractBtn.addEventListener('click', async () => {

@@ -827,28 +827,10 @@ function parseSaveMcr(data) {
 }
 
 /** Ask save-worker.js to recompute a VMP's signature and report a match/mismatch. */
-function verifyVmpSignature(vmpBytes) {
-  return new Promise((resolve, reject) => {
-    const worker = new Worker('save-worker.js');
-
-    worker.onmessage = function(e) {
-      const msg = e.data;
-      if (msg.type === 'done') {
-        worker.terminate();
-        resolve(msg.result);
-      } else if (msg.type === 'error') {
-        worker.terminate();
-        reject(new Error(msg.message));
-      }
-    };
-
-    worker.onerror = function(err) {
-      worker.terminate();
-      reject(new Error(err.message || String(err)));
-    };
-
-    worker.postMessage({ action: 'verifyVmp', vmp: vmpBytes.buffer.slice(vmpBytes.byteOffset, vmpBytes.byteOffset + vmpBytes.byteLength) });
-  });
+async function verifyVmpSignature(vmpBytes) {
+  const vmp = vmpBytes.buffer.slice(vmpBytes.byteOffset, vmpBytes.byteOffset + vmpBytes.byteLength);
+  const done = await runWorker(new Worker('save-worker.js'), { action: 'verifyVmp', vmp });
+  return done.result;
 }
 
 async function inspectSaveFile(file, kind) {

@@ -10,16 +10,16 @@
 // returns the compressed parts + uncompressed flags back to the main thread.
 //
 // Message protocol:
-//   IN:  { blocks: ArrayBuffer[], targetFormat: 'CSO'|'ZSO', rangeIndex: number }
-//   OUT: { type: 'progress', rangeIndex, blockIndex, totalBlocks }
-//   OUT: { type: 'done', rangeIndex, parts: Uint8Array[], uncompressedFlags: boolean[] }
+//   IN:  { blocks: ArrayBuffer[], targetFormat: 'CSO'|'ZSO' }
+//   OUT: { type: 'progress', blockIndex, totalBlocks }
+//   OUT: { type: 'done', parts: Uint8Array[], uncompressedFlags: boolean[] }
 //
 // zlib (deflateRaw) is prepended by build.js banner — no import needed
 
 import { compressBlock } from './cso/lz4.js';
 
 self.onmessage = function(e) {
-  const { blocks, targetFormat, rangeIndex } = e.data;
+  const { blocks, targetFormat } = e.data;
   const totalBlocks = blocks.length;
   const parts = [];
   const uncompressedFlags = [];
@@ -43,7 +43,7 @@ self.onmessage = function(e) {
     }
 
     if (i % 256 === 0) {
-      self.postMessage({ type: 'progress', rangeIndex, blockIndex: i, totalBlocks });
+      self.postMessage({ type: 'progress', blockIndex: i, totalBlocks });
     }
   }
 
@@ -51,7 +51,6 @@ self.onmessage = function(e) {
   const transferable = parts.map(p => p.buffer);
   self.postMessage({
     type: 'done',
-    rangeIndex,
     parts,
     uncompressedFlags,
   }, transferable);

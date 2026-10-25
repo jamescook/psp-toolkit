@@ -1,6 +1,7 @@
 // Shared UI utilities and helpers
 //
-// This file is loaded first (before convert.js, eboot-ui.js, diagnose.js) and
+// This file is loaded after run-worker.js and before convert.js, eboot-ui.js
+// and diagnose.js. It
 // provides common functions used across all tabs: file size formatting, download
 // triggers, format detection, disc ID auto-detection, CUE parsing, artwork
 // management, tab switching, and a minimal ZIP creator for EBOOT downloads.
@@ -138,28 +139,13 @@ function createZip(entries) {
  *  @param {Array<{name: string, data: Uint8Array}>} entries
  *  @param {function(string, number, number): void} [onProgress] - called with (phase, index, total)
  *  @returns {Promise<Uint8Array>} */
-function createZipInWorker(entries, onProgress) {
-  return new Promise((resolve, reject) => {
-    const worker = new Worker('zip-worker.js');
-    const transferList = entries.map(e => e.data.buffer);
-    worker.onmessage = function(e) {
-      const msg = e.data;
-      if (msg.type === 'progress') {
-        if (onProgress) onProgress(msg.phase, msg.index, msg.total);
-      } else if (msg.type === 'done') {
-        worker.terminate();
-        resolve(new Uint8Array(msg.result));
-      }
-    };
-    worker.onerror = function(err) {
-      worker.terminate();
-      reject(new Error(err.message || String(err)));
-    };
-    worker.postMessage(
-      { entries: entries.map(e => ({ name: e.name, data: e.data.buffer })) },
-      transferList
-    );
+async function createZipInWorker(entries, onProgress) {
+  const message = { entries: entries.map(e => ({ name: e.name, data: e.data.buffer })) };
+  const done = await runWorker(new Worker('zip-worker.js'), message, {
+    transfer: entries.map(e => e.data.buffer),
+    onProgress: (msg) => onProgress?.(msg.phase, msg.index, msg.total),
   });
+  return new Uint8Array(done.result);
 }
 
 // ── Tab switching ─────────────────────────────────────────────────────────────

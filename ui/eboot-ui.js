@@ -607,83 +607,60 @@ async function compressDiscParallel(file, compressionLevel, numThreads, onProgre
   }
 
   // Spawn workers and distribute work
-  const workerResults = new Array(ranges.length);
   const workerProgress = new Array(ranges.length).fill(0);
-  let completedWorkers = 0;
 
-  return new Promise((resolve, reject) => {
-    for (let r = 0; r < ranges.length; r++) {
-      const worker = new Worker('compress-worker.js');
-      ebootActiveCompressWorkers.push(worker);
-      const blockBuffers = ranges[r].map(b => b.buffer);
+  const workerResults = await Promise.all(ranges.map(async (blocks, r) => {
+    const worker = new Worker('compress-worker.js');
+    ebootActiveCompressWorkers.push(worker);
+    const done = await runWorker(worker, { blocks, compressionLevel }, {
+      transfer: blocks.map(b => b.buffer),
+      onProgress: (msg) => {
+        workerProgress[r] = msg.blockIndex / msg.totalBlocks;
+        const avgProgress = workerProgress.reduce((a, b) => a + b, 0) / ranges.length;
+        onProgress(0.3 + avgProgress * 0.65, `Compressing... (${numThreads} workers)`);
+      },
+    });
+    // Convert transferred ArrayBuffers back to Uint8Arrays
+    return {
+      parts: done.parts.map(p => new Uint8Array(p.buffer || p)),
+      indexEntries: done.indexEntries,
+      stats: done.stats,
+    };
+  }));
 
-      worker.onmessage = function(e) {
-        const msg = e.data;
-        if (msg.type === 'progress') {
-          workerProgress[msg.rangeIndex] = msg.blockIndex / msg.totalBlocks;
-          const avgProgress = workerProgress.reduce((a, b) => a + b, 0) / ranges.length;
-          onProgress(0.3 + avgProgress * 0.65, `Compressing... (${numThreads} workers)`);
-        } else if (msg.type === 'done') {
-          // Convert transferred ArrayBuffers back to Uint8Arrays
-          workerResults[msg.rangeIndex] = {
-            parts: msg.parts.map(p => new Uint8Array(p.buffer || p)),
-            indexEntries: msg.indexEntries,
-            stats: msg.stats,
-          };
-          worker.terminate();
-          completedWorkers++;
+  // Stitch results — adjust offsets for ranges after the first
+  const allParts = [];
+  const allIndexEntries = [];
+  let runningOffset = 0;
+  let totalCompressedCount = 0;
+  let totalUncompressedCount = 0;
+  let totalCompressedBytes = 0;
 
-          if (completedWorkers === ranges.length) {
-            // Stitch results — adjust offsets for ranges after the first
-            const allParts = [];
-            const allIndexEntries = [];
-            let runningOffset = 0;
-            let totalCompressedCount = 0;
-            let totalUncompressedCount = 0;
-            let totalCompressedBytes = 0;
-
-            for (let i = 0; i < workerResults.length; i++) {
-              const wr = workerResults[i];
-              for (const part of wr.parts) allParts.push(part);
-              for (const entry of wr.indexEntries) {
-                allIndexEntries.push({
-                  offset: entry.offset + runningOffset,
-                  size: entry.size,
-                  sha1: entry.sha1,
-                });
-              }
-              runningOffset += wr.stats.totalCompressedBytes;
-              totalCompressedCount += wr.stats.compressedCount;
-              totalUncompressedCount += wr.stats.uncompressedCount;
-              totalCompressedBytes += wr.stats.totalCompressedBytes;
-            }
-
-            onProgress(0.95, 'Compression complete');
-            resolve({
-              parts: allParts,
-              indexEntries: allIndexEntries,
-              stats: {
-                compressedCount: totalCompressedCount,
-                uncompressedCount: totalUncompressedCount,
-                totalCompressedBytes,
-              },
-            });
-          }
-        }
-      };
-
-      worker.onerror = function(err) {
-        worker.terminate();
-        reject(new Error('Compression worker error: ' + (err.message || err)));
-      };
-
-      // Transfer block ArrayBuffers to the worker
-      worker.postMessage(
-        { blocks: ranges[r], compressionLevel, rangeIndex: r },
-        blockBuffers
-      );
+  for (const wr of workerResults) {
+    for (const part of wr.parts) allParts.push(part);
+    for (const entry of wr.indexEntries) {
+      allIndexEntries.push({
+        offset: entry.offset + runningOffset,
+        size: entry.size,
+        sha1: entry.sha1,
+      });
     }
-  });
+    runningOffset += wr.stats.totalCompressedBytes;
+    totalCompressedCount += wr.stats.compressedCount;
+    totalUncompressedCount += wr.stats.uncompressedCount;
+    totalCompressedBytes += wr.stats.totalCompressedBytes;
+  }
+
+  onProgress(0.95, 'Compression complete');
+  return {
+    parts: allParts,
+    indexEntries: allIndexEntries,
+    stats: {
+      compressedCount: totalCompressedCount,
+      uncompressedCount: totalUncompressedCount,
+      totalCompressedBytes,
+    },
+  };
 }
 
 // ── EBOOT build ──────────────────────────────────────────────────────────────
@@ -754,63 +731,58 @@ async function startEbootBuild() {
   const worker = new Worker('eboot-worker.js');
   ebootActiveWorker = worker;
 
-  worker.onmessage = function(e) {
-    const msg = e.data;
-    if (msg.type === 'progress') {
-      if (preCompressed) {
-        // Scale assembly progress into 90-96% (leave room for zip packaging)
-        const scaled = 0.90 + msg.pct * 0.06;
-        showEbootProgress(Math.min(scaled, 0.96), msg.label);
-      } else {
-        // Cap at 96% — zip packaging takes the remaining 4%
-        showEbootProgress(Math.min(msg.pct * 0.96, 0.96), msg.label);
-      }
-    } else if (msg.type === 'done') {
-      showEbootProgress(0.97, 'Packaging ZIP...');
-      const ebootResult = new Uint8Array(msg.result);
-      const ebootSize = ebootResult.length;
-      const zipPath = discId + '/EBOOT.PBP';
-      createZipInWorker([{ name: zipPath, data: ebootResult }], (phase) => {
-        const step = phase === 'crc' ? 'Checksumming' : phase === 'alloc' ? 'Allocating' : 'Copying';
-        showEbootProgress(0.97, `Packaging ZIP \u2014 ${step}...`);
-      }).then(zipData => {
-        const zipName = discId + '.zip';
-        download(zipData, zipName);
-        const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
-        ebootStatusEl.textContent = `Done in ${elapsed}s \u2014 ${formatSize(ebootSize)} saved as ${zipName}`;
-        showEbootProgress(1, 'Complete');
-        if (msg.buildLog) showBuildLogDownload(msg.buildLog);
-        finish();
-      }).catch(err => {
-        ebootStatusEl.textContent = `ZIP error: ${err.message}`;
-        ebootStatusEl.className = 'status error';
-        finish();
-      });
-    } else if (msg.type === 'error') {
-      ebootStatusEl.textContent = `Error: ${msg.message}`;
-      ebootStatusEl.className = 'status error';
-      if (msg.buildLog) showBuildLogDownload(msg.buildLog);
-      finish();
-    }
-  };
-  worker.onerror = function(err) {
-    console.error('EBOOT worker error:', err);
-    const detail = err.message || `${err.filename}:${err.lineno} ${err.type}`;
-    ebootStatusEl.textContent = `Worker error: ${detail}`;
-    ebootStatusEl.className = 'status error';
-    finish();
-  };
-  function finish() {
-    ebootWorking = false;
-    ebootActiveWorker = null;
-    for (const btn of ebootActionsEl.querySelectorAll('button')) btn.disabled = false;
-    setEbootInputsDisabled(false);
-    worker.terminate();
-  }
-
   const files = ebootFiles.map(e => e.file);
   const icon0 = currentIcon0 || undefined;
   const pic0 = currentPic0 || undefined;
   const pic1 = currentPic1 || undefined;
-  worker.postMessage({ files, title, discIds, compressionLevel, parentalLevel, region, discInfo, icon0, pic0, pic1, preCompressed });
+  let done;
+  try {
+    done = await runWorker(worker, { files, title, discIds, compressionLevel, parentalLevel, region, discInfo, icon0, pic0, pic1, preCompressed }, {
+      onProgress: (msg) => {
+        if (preCompressed) {
+          // Scale assembly progress into 90-96% (leave room for zip packaging)
+          const scaled = 0.90 + msg.pct * 0.06;
+          showEbootProgress(Math.min(scaled, 0.96), msg.label);
+        } else {
+          // Cap at 96% — zip packaging takes the remaining 4%
+          showEbootProgress(Math.min(msg.pct * 0.96, 0.96), msg.label);
+        }
+      },
+    });
+  } catch (err) {
+    // A crash's message already reads "Worker error: ..."
+    ebootStatusEl.textContent = err.workerMessage ? `Error: ${err.message}` : err.message;
+    ebootStatusEl.className = 'status error';
+    if (err.workerMessage?.buildLog) showBuildLogDownload(err.workerMessage.buildLog);
+    finishEbootBuild();
+    return;
+  }
+
+  showEbootProgress(0.97, 'Packaging ZIP...');
+  const ebootResult = new Uint8Array(done.result);
+  const ebootSize = ebootResult.length;
+  const zipPath = discId + '/EBOOT.PBP';
+  try {
+    const zipData = await createZipInWorker([{ name: zipPath, data: ebootResult }], (phase) => {
+      const step = phase === 'crc' ? 'Checksumming' : phase === 'alloc' ? 'Allocating' : 'Copying';
+      showEbootProgress(0.97, `Packaging ZIP \u2014 ${step}...`);
+    });
+    const zipName = discId + '.zip';
+    download(zipData, zipName);
+    const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+    ebootStatusEl.textContent = `Done in ${elapsed}s \u2014 ${formatSize(ebootSize)} saved as ${zipName}`;
+    showEbootProgress(1, 'Complete');
+    if (done.buildLog) showBuildLogDownload(done.buildLog);
+  } catch (err) {
+    ebootStatusEl.textContent = `ZIP error: ${err.message}`;
+    ebootStatusEl.className = 'status error';
+  }
+  finishEbootBuild();
+}
+
+function finishEbootBuild() {
+  ebootWorking = false;
+  ebootActiveWorker = null;
+  for (const btn of ebootActionsEl.querySelectorAll('button')) btn.disabled = false;
+  setEbootInputsDisabled(false);
 }

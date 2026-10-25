@@ -29,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Larger fonts, wider layout, and more padding throughout the UI
 - Table row striping and cleaner spacing in diagnose output
 
+### Fixed
+
+- Multi-threaded CSO/ZSO and EBOOT compression, and EBOOT ZIP packaging, show an error instead of hanging when a worker fails
+
 ## [0.1.0] - 2026-03-07
 
 ### Added

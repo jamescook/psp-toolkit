@@ -261,30 +261,11 @@ function hidePatchProgress() {
 
 // ── Apply (parallel batch) ───────────────────────────────────────────────────
 
-function applyPair(rom, patch, onProgress) {
-  return new Promise((resolve, reject) => {
-    const worker = new Worker('patch-worker.js');
-
-    worker.onmessage = function(e) {
-      const msg = e.data;
-      if (msg.type === 'progress') {
-        onProgress?.(msg.pct, msg.label);
-      } else if (msg.type === 'done') {
-        worker.terminate();
-        resolve({ result: new Uint8Array(msg.result), format: msg.format });
-      } else if (msg.type === 'error') {
-        worker.terminate();
-        reject(new Error(msg.message));
-      }
-    };
-
-    worker.onerror = function(err) {
-      worker.terminate();
-      reject(new Error(err.message || String(err)));
-    };
-
-    worker.postMessage({ rom, patch });
+async function applyPair(rom, patch, onProgress) {
+  const done = await runWorker(new Worker('patch-worker.js'), { rom, patch }, {
+    onProgress: (msg) => onProgress?.(msg.pct, msg.label),
   });
+  return { result: new Uint8Array(done.result), format: done.format };
 }
 
 patchApplyBtn.addEventListener('click', async () => {
