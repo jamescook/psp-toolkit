@@ -279,8 +279,9 @@ function titleFromFilename(name) {
 }
 
 /**
- * Auto-detect disc ID and title from a PS1 BIN/ISO by reading SYSTEM.CNF.
- * Best-effort — returns null on failure without throwing.
+ * Auto-detect disc ID and title from a PS1 BIN/ISO (SYSTEM.CNF) or a PSP UMD
+ * ISO (UMD_DATA.BIN). Best-effort — returns null on failure without throwing.
+ * @returns {Promise<{discId: string|null, title: string, platform?: 'ps1'|'psp'} | null>}
  */
 async function autoDetectDiscId(file) {
   try {
@@ -319,14 +320,14 @@ async function autoDetectDiscId(file) {
         const cnfBuf = new Uint8Array(await file.slice(cnfLba*sectorSize+dataOffset, cnfLba*sectorSize+dataOffset+Math.min(cnfSize,2048)).arrayBuffer());
         const cnfText = new TextDecoder('ascii').decode(cnfBuf);
         const m = cnfText.match(/BOOT\s*=\s*cdrom[:\d]*\\?\\?([A-Z]{4}_\d{3}\.\d{2})/i);
-        if (m) return { discId: m[1].replace(/[_.]/g, ''), title };
+        if (m) return { discId: m[1].replace(/[_.]/g, ''), title, platform: 'ps1' };
       }
       // A PSP UMD has no SYSTEM.CNF: UMD_DATA.BIN starts "ULUS-10277|<hex>|0001|G".
       if (name === 'UMD_DATA.BIN') {
         const umdLba = rootBuf[pos+2]|(rootBuf[pos+3]<<8)|(rootBuf[pos+4]<<16)|(rootBuf[pos+5]<<24);
         const umdBuf = new Uint8Array(await file.slice(umdLba*sectorSize+dataOffset, umdLba*sectorSize+dataOffset+32).arrayBuffer());
         const m = new TextDecoder('ascii').decode(umdBuf).match(/^([A-Z]{4})-(\d{5})\|/);
-        if (m) return { discId: m[1] + m[2], title };
+        if (m) return { discId: m[1] + m[2], title, platform: 'psp' };
       }
       pos += recLen;
     }

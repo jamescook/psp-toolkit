@@ -175,6 +175,12 @@ async function handleEbootDrop(fileList) {
   const cueFiles = allFiles.filter(f => f.name.toLowerCase().endsWith('.cue'));
   const nonCueFiles = allFiles.filter(f => !f.name.toLowerCase().endsWith('.cue'));
 
+  const pspGame = await findPspGame(nonCueFiles);
+  if (pspGame) {
+    refusePspGame(pspGame.file, pspGame.detected);
+    return;
+  }
+
   // If we're already in multi-disc mode and more files are dropped, add them
   if (ebootFiles.length > 0) {
     await addDiscFiles(cueFiles, nonCueFiles);
@@ -223,7 +229,46 @@ async function handleEbootDrop(fileList) {
   }
 }
 
+// ── PSP games ────────────────────────────────────────────────────────────────
+// An EBOOT built here runs in the PSP's PS1 emulator, so a PSP game in one
+// cannot start. A PSP game runs from the ISO folder as an ISO or CSO and shows
+// the artwork it ships with, so the tab refuses it and says where it goes.
+
+/** The first file that is a PSP UMD image, with what was detected about it, or null. */
+async function findPspGame(files) {
+  for (const file of files) {
+    const detected = await autoDetectDiscId(file);
+    if (detected?.platform === 'psp') return { file, detected };
+  }
+  return null;
+}
+
+/** Show the PSP game with every control disabled, and an error saying where it belongs. */
+function refusePspGame(file, detected) {
+  resetEbootUI();
+  ebootFileName.textContent = file.name;
+  ebootFileMeta.innerHTML = formatSize(file.size) + ' <span class="format-label format-psp">PSP Game</span>';
+  ebootFileInfo.style.display = 'block';
+  ebootTitle.value = detected.title || '';
+  ebootDiscId.value = detected.discId;
+  discIdDetected.textContent = '(auto-detected)';
+  showEbootActions();
+  ebootActionsEl.querySelector('.btn-eboot').disabled = true;
+  setEbootSettingsLocked(true);
+  ebootStatusEl.textContent = `${detected.discId} is a PSP game, not a PS1 disc, so it can't become an EBOOT. ` +
+    'Put it in the ISO folder on your memory stick as it is, or as a CSO (a compressed copy of the ISO, ' +
+    'made in the Convert tab). It shows its own artwork on the PSP.';
+  ebootStatusEl.className = 'status error';
+}
+
+/** Disable every setting and the artwork slots, but leave the drop zone usable. */
+function setEbootSettingsLocked(locked) {
+  for (const el of ebootInputs) el.disabled = locked;
+  ebootOpts.classList.toggle('locked', locked);
+}
+
 function resetEbootUI() {
+  setEbootSettingsLocked(false);
   ebootStatusEl.textContent = '';
   ebootStatusEl.className = 'status';
   ebootProgressArea.style.display = 'none';
@@ -253,7 +298,6 @@ function showEbootActions() {
   ebootActionsEl.appendChild(ebootBtn);
   ebootActionsEl.style.display = 'flex';
   ebootOpts.style.display = 'block';
-  regenerateDefaults();
 }
 
 function findBinFile(binName, files) {

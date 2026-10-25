@@ -128,6 +128,7 @@ input[type="file"] { display: none; }
 .format-zso { background: #5a3f27; color: var(--warn); }
 .format-iso { background: #27415a; color: var(--info); }
 .format-ps1 { background: #5a2755; color: #df64d0; }
+.format-psp { background: #27415a; color: var(--info); }
 .actions {
   margin-top: 0.8rem;
   display: none;
@@ -206,6 +207,12 @@ input[type="file"] { display: none; }
   padding: 1.2rem 1.4rem;
   margin-top: 0.6rem;
   display: none;
+}
+.eboot-opts.locked {
+  opacity: 0.5;
+}
+.eboot-opts.locked .art-preview {
+  pointer-events: none;
 }
 .eboot-opts label {
   display: block;

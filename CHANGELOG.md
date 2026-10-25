@@ -11,7 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Safari: converting, building an EBOOT, and patching work in the offline `index.html` opened from disk (they failed with "The I/O read operation failed")
 - EBOOT tab: the file picker offers `.iso` disc images, which dropping already accepted
-- PSP discs: the EBOOT and Diagnose tabs detect the disc ID (from `UMD_DATA.BIN`), so artwork fetching works for PSP games
+- PSP discs: the EBOOT and Diagnose tabs detect the disc ID (from `UMD_DATA.BIN`)
+
+### Changed
+
+- EBOOT tab refuses a PSP game: an EBOOT runs in the PSP's PS1 emulator, so a PSP game in one cannot start. It disables the controls and says to put the ISO or a CSO in the `ISO` folder instead
 
 ## [0.3.0] - 2026-10-25
 

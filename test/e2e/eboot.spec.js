@@ -100,9 +100,28 @@ test('Multi-disc BIN drop → build EBOOT → download ZIP', async ({ page }) =>
   expect(pbpIdx).toBeGreaterThan(0);
 });
 
-test('A PSP disc gets its ID from UMD_DATA.BIN', async ({ page }) => {
-  await page.locator('[data-testid="eboot-file-input"]').setInputFiles(path.join(FIXTURES, 'psp-disc.iso'));
-  await expect(page.locator('[data-testid="eboot-disc-id"]')).toHaveValue('ULUS10277', { timeout: 5000 });
+test('A PSP game is refused: the error says why, and every control is disabled', async ({ page }) => {
+  const input = page.locator('[data-testid="eboot-file-input"]');
+  await input.setInputFiles(path.join(FIXTURES, 'psp-disc.iso'));
+
+  const status = page.locator('[data-testid="eboot-status"]');
+  await expect(status).toContainText('PSP game', { timeout: 5000 });
+  await expect(status).toHaveClass(/error/);
+  await expect(page.locator('[data-testid="eboot-disc-id"]')).toHaveValue('ULUS10277');
+  await expect(page.locator('[data-testid="eboot-build-btn"]')).toBeDisabled();
+  for (const control of ['eboot-title', 'eboot-disc-id']) {
+    await expect(page.locator(`[data-testid="${control}"]`)).toBeDisabled();
+  }
+  await expect(page.locator('#ebootCompression')).toBeDisabled();
+  await expect(page.locator('#ebootThreads')).toBeDisabled();
+  await expect(page.locator('#ebootFetchArt')).toBeDisabled();
+
+  // A PS1 disc dropped next is accepted as normal.
+  await input.setInputFiles(path.join(FIXTURES, 'ps1-disc1.bin'));
+  await expect(page.locator('[data-testid="eboot-disc-id"]')).toHaveValue('SLUS00001', { timeout: 5000 });
+  await expect(status).toHaveText('');
+  await expect(page.locator('[data-testid="eboot-build-btn"]')).toBeEnabled();
+  await expect(page.locator('[data-testid="eboot-title"]')).toBeEnabled();
 });
 
 test('The file picker offers .iso discs, as dropping does', async ({ page }) => {
