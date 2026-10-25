@@ -321,6 +321,13 @@ async function autoDetectDiscId(file) {
         const m = cnfText.match(/BOOT\s*=\s*cdrom[:\d]*\\?\\?([A-Z]{4}_\d{3}\.\d{2})/i);
         if (m) return { discId: m[1].replace(/[_.]/g, ''), title };
       }
+      // A PSP UMD has no SYSTEM.CNF: UMD_DATA.BIN starts "ULUS-10277|<hex>|0001|G".
+      if (name === 'UMD_DATA.BIN') {
+        const umdLba = rootBuf[pos+2]|(rootBuf[pos+3]<<8)|(rootBuf[pos+4]<<16)|(rootBuf[pos+5]<<24);
+        const umdBuf = new Uint8Array(await file.slice(umdLba*sectorSize+dataOffset, umdLba*sectorSize+dataOffset+32).arrayBuffer());
+        const m = new TextDecoder('ascii').decode(umdBuf).match(/^([A-Z]{4})-(\d{5})\|/);
+        if (m) return { discId: m[1] + m[2], title };
+      }
       pos += recLen;
     }
     if (title) return { discId: null, title };

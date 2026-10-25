@@ -9,6 +9,9 @@
 //   3. Walk the root directory to find SYSTEM.CNF
 //   4. Parse "BOOT = cdrom:\SLUS_008.92;1" → disc ID "SLUS00892"
 //
+// A PSP UMD has no SYSTEM.CNF; its root holds UMD_DATA.BIN, which starts with
+// the serial: "ULUS-10277|4BEB7679A0E821C1|0001|G" → disc ID "ULUS10277".
+//
 // Also extracts the volume ID from the PVD (offset 40, 32 bytes) as a
 // fallback game title, though many PS1 games leave this empty.
 //
@@ -25,7 +28,7 @@ const RAW_DATA_OFFSET = 24;    // Mode 2 Form 1: 12 sync + 4 header + 8 subheade
  * @param {File} file - The disc image file (.bin or .iso)
  * @returns {Promise<{discId: string, bootFile: string, title: string} | null>}
  *   discId: normalized ID without punctuation (e.g. "SCUS94163")
- *   bootFile: raw filename from SYSTEM.CNF (e.g. "SCUS_941.63")
+ *   bootFile: raw filename from SYSTEM.CNF (e.g. "SCUS_941.63"); null for a PSP UMD
  *   title: volume ID from PVD, title-cased (may be empty for some games)
  */
 export async function detectDiscId(file) {
@@ -58,6 +61,7 @@ export async function detectDiscId(file) {
   const rootSectors = Math.ceil(rootSize / ISO_SECTOR_SIZE);
   let systemCnfLba = 0;
   let systemCnfSize = 0;
+  let umdDataLba = 0;
 
   for (let s = 0; s < rootSectors; s++) {
     const dirData = await readSector(file, rootLba + s, sectorSize, dataOffset);
@@ -77,9 +81,17 @@ export async function detectDiscId(file) {
         systemCnfSize = readUint32LE(dirData, pos + 10);
         break;
       }
+      if (cleanName === 'UMD_DATA.BIN') umdDataLba = readUint32LE(dirData, pos + 2);
       pos += recLen;
     }
     if (systemCnfLba) break;
+  }
+
+  // A PSP UMD has no SYSTEM.CNF: UMD_DATA.BIN starts "ULUS-10277|<hex>|0001|G".
+  if (!systemCnfLba && umdDataLba) {
+    const umdData = await readSector(file, umdDataLba, sectorSize, dataOffset);
+    const serial = umdData && new TextDecoder('ascii').decode(umdData.slice(0, 32)).match(/^([A-Z]{4})-(\d{5})\|/);
+    return serial ? { discId: serial[1] + serial[2], bootFile: null, title } : null;
   }
 
   if (!systemCnfLba) return null;

@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { detectDiscId, isRawImage } from './helpers.js';
 import { MockFile } from './helpers.js';
-import { createMockPS1Disc, createMultiTrackDisc } from './fixtures.js';
+import { createMockPS1Disc, createMockPSPDisc, createMultiTrackDisc } from './fixtures.js';
 
 describe('isRawImage', () => {
   it('detects raw 2352-byte sector images by sync pattern', async () => {
@@ -51,6 +51,14 @@ describe('detectDiscId', () => {
     assert.ok(result);
     assert.equal(result.discId, 'SLUS00896');
     assert.equal(result.title, 'Tron Bonne');
+  });
+
+  it('reads a PSP disc ID from UMD_DATA.BIN', async () => {
+    const disc = createMockPSPDisc({ serial: 'ULUS-10277', volumeId: 'TEST_PSP' });
+    const result = await detectDiscId(new MockFile(disc, 'game.iso'));
+    assert.ok(result);
+    assert.equal(result.discId, 'ULUS10277');
+    assert.equal(result.title, 'Test Psp');
   });
 
   it('returns null for non-PS1 data', async () => {

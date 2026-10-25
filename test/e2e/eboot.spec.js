@@ -100,6 +100,11 @@ test('Multi-disc BIN drop → build EBOOT → download ZIP', async ({ page }) =>
   expect(pbpIdx).toBeGreaterThan(0);
 });
 
+test('A PSP disc gets its ID from UMD_DATA.BIN', async ({ page }) => {
+  await page.locator('[data-testid="eboot-file-input"]').setInputFiles(path.join(FIXTURES, 'psp-disc.iso'));
+  await expect(page.locator('[data-testid="eboot-disc-id"]')).toHaveValue('ULUS10277', { timeout: 5000 });
+});
+
 test('The file picker offers .iso discs, as dropping does', async ({ page }) => {
   const accept = await page.locator('[data-testid="eboot-file-input"]').getAttribute('accept');
   expect(accept.split(',')).toEqual(expect.arrayContaining(['.bin', '.iso', '.cue']));

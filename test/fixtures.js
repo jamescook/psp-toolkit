@@ -207,6 +207,54 @@ export function createMockPS1Disc(opts) {
 }
 
 /**
+ * Create a minimal PSP UMD image: cooked 2048-byte sectors, with the disc ID in
+ * UMD_DATA.BIN at the root rather than in a SYSTEM.CNF.
+ *
+ * UMD_DATA.BIN starts "<serial>|<16 hex digits>|<4 digits>|G", as on a real
+ * UMD (e.g. "ULUS-10277|4BEB7679A0E821C1|0001|G").
+ *
+ * @param {Object} opts
+ * @param {string} opts.serial - e.g. "ULUS-10277"
+ * @param {string} [opts.volumeId] - PVD volume ID
+ * @returns {Uint8Array} Cooked 2048-byte sector disc image
+ */
+export function createMockPSPDisc(opts) {
+  const totalSectors = 24;
+  const image = new Uint8Array(totalSectors * ISO_SECTOR_SIZE);
+
+  const pvd = image.subarray(16 * ISO_SECTOR_SIZE, 17 * ISO_SECTOR_SIZE);
+  pvd[0] = 1;
+  writeStr(pvd, 1, 'CD001');
+  pvd[6] = 1;
+  writeStr(pvd, 40, (opts.volumeId || 'UMD VIDEO').padEnd(32, ' '));
+  writeU32Both(pvd, 80, totalSectors);
+  writeU16Both(pvd, 128, ISO_SECTOR_SIZE);
+  const rootDirRec = pvd.subarray(156, 190);
+  rootDirRec[0] = 34;
+  writeU32Both(rootDirRec, 2, 18);
+  writeU32Both(rootDirRec, 10, ISO_SECTOR_SIZE);
+  rootDirRec[25] = 0x02;
+  rootDirRec[32] = 1;
+
+  const terminator = 17 * ISO_SECTOR_SIZE;
+  image[terminator] = 255;
+  writeStr(image, terminator + 1, 'CD001');
+
+  const umdData = new TextEncoder().encode(`${opts.serial}|4BEB7679A0E821C1|0001|G`);
+  let dirPos = 18 * ISO_SECTOR_SIZE;
+  for (const rec of [
+    buildDirRecord('\x00', 18, ISO_SECTOR_SIZE, true),
+    buildDirRecord('\x01', 18, ISO_SECTOR_SIZE, true),
+    buildDirRecord('UMD_DATA.BIN;1', 19, umdData.length, false),
+  ]) {
+    image.set(rec, dirPos);
+    dirPos += rec.length;
+  }
+  image.set(umdData, 19 * ISO_SECTOR_SIZE);
+  return image;
+}
+
+/**
  * Create a CUE sheet and split BIN files for a multi-track disc.
  * Track 1 = data (MODE2/2352), Track 2 = audio.
  *
