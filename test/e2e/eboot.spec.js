@@ -105,6 +105,29 @@ test('Multi-disc BIN drop → build EBOOT → download ZIP', async ({ page }) =>
   expect(pbpIdx).toBeGreaterThan(0);
 });
 
+test('Building with 2 workers produces the same EBOOT as with 1', async ({ page }) => {
+  const input = page.locator('[data-testid="eboot-file-input"]');
+  await input.setInputFiles([path.join(FIXTURES, 'ps1-disc1.bin')]);
+  await expect(page.locator('[data-testid="eboot-disc-id"]')).not.toHaveValue('', { timeout: 5000 });
+  await expect(page.locator('#artIcon0')).toHaveAttribute('src', /.+/, { timeout: 5000 });
+
+  async function buildWith(workers) {
+    await page.locator('#ebootThreads').fill(String(workers));
+    const [download] = await Promise.all([
+      page.waitForEvent('download', { timeout: 60000 }),
+      page.locator('[data-testid="eboot-build-btn"]').click(),
+    ]);
+    await expect(page.locator('[data-testid="eboot-build-btn"]')).toBeEnabled({ timeout: 60000 });
+    return fs.readFileSync(await download.path());
+  }
+
+  // The ZIP is stored (uncompressed) with no timestamps, so equal ZIPs mean equal EBOOTs.
+  const oneWorker = await buildWith(1);
+  const twoWorkers = await buildWith(2);
+  expect(twoWorkers.length).toBe(oneWorker.length);
+  expect(twoWorkers.equals(oneWorker)).toBe(true);
+});
+
 test('Single disc with CUE+BIN → build EBOOT', async ({ page }) => {
   const disc1Bin = path.join(FIXTURES, 'ps1-disc1.bin');
   const disc1Cue = path.join(FIXTURES, 'ps1-disc1.cue');
