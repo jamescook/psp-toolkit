@@ -131,39 +131,42 @@ function loadRunWorkerPool() {
   return ctx.runWorkerPool;
 }
 
-/** Starts a pool over `blocks` and returns it with the fake workers it created. */
-function startPool(blocks, workerCount, options = {}) {
+/** Starts a pool over `blockCount` blocks and returns it with the fake workers it created. */
+function startPool(blockCount, workerCount, options = {}) {
   const runWorkerPool = loadRunWorkerPool();
   const workers = [];
   const pool = runWorkerPool(() => {
     const worker = new FakeWorker();
     workers.push(worker);
     return worker;
-  }, blocks, workerCount, { message: (range) => ({ range }), ...options });
+  }, blockCount, workerCount, { message: (range) => ({ range }), ...options });
   return { pool, workers };
 }
 
-describe('runWorkerPool', () => {
-  it('gives each worker one contiguous range and returns the results in range order', async () => {
-    const { pool, workers } = startPool(['a', 'b', 'c', 'd', 'e'], 2);
+/** The [start, end) range each worker was sent, as plain arrays this test can compare. */
+const postedRanges = (workers) => workers.map(w => [w.posted[0].message.range.start, w.posted[0].message.range.end]);
 
-    assert.deepEqual(workers.map(w => w.posted[0].message.range), [['a', 'b', 'c'], ['d', 'e']]);
+describe('runWorkerPool', () => {
+  it('gives each worker one contiguous range of blocks and returns the results in range order', async () => {
+    const { pool, workers } = startPool(5, 2);
+
+    assert.deepEqual(postedRanges(workers), [[0, 3], [3, 5]]);
     workers[1].reply({ type: 'done', result: 'second' });
     workers[0].reply({ type: 'done', result: 'first' });
     assert.deepEqual((await pool).map(done => done.result), ['first', 'second']);
   });
 
   it('starts no more workers than there are blocks', async () => {
-    const { pool, workers } = startPool(['a', 'b'], 8);
+    const { pool, workers } = startPool(2, 8);
 
-    assert.equal(workers.length, 2);
+    assert.deepEqual(postedRanges(workers), [[0, 1], [1, 2]]);
     for (const worker of workers) worker.reply({ type: 'done' });
     await pool;
   });
 
   it('reports progress as the average across workers, with the worker count', async () => {
     const seen = [];
-    const { pool, workers } = startPool(['a', 'b', 'c', 'd'], 2, {
+    const { pool, workers } = startPool(4, 2, {
       onProgress: (fraction, workerCount) => seen.push([fraction, workerCount]),
     });
     workers[0].reply({ type: 'progress', blockIndex: 1, totalBlocks: 2 });
@@ -174,16 +177,8 @@ describe('runWorkerPool', () => {
     assert.deepEqual(seen, [[0.25, 2], [0.75, 2]]);
   });
 
-  it('transfers the buffers chosen for each range', async () => {
-    const { pool, workers } = startPool(['a', 'b'], 2, { transfer: (range) => range.map(x => x + '!') });
-
-    assert.deepEqual(workers.map(w => w.posted[0].transfer), [['a!'], ['b!']]);
-    for (const worker of workers) worker.reply({ type: 'done' });
-    await pool;
-  });
-
   it('rejects when any worker fails', async () => {
-    const { pool, workers } = startPool(['a', 'b'], 2);
+    const { pool, workers } = startPool(2, 2);
     workers[0].reply({ type: 'done' });
     workers[1].reply({ type: 'error', message: 'out of memory' });
 
@@ -192,7 +187,7 @@ describe('runWorkerPool', () => {
 
   it('stops every worker when the signal aborts', async () => {
     const controller = new AbortController();
-    const { pool, workers } = startPool(['a', 'b', 'c'], 3, { signal: controller.signal });
+    const { pool, workers } = startPool(3, 3, { signal: controller.signal });
     controller.abort();
 
     await assert.rejects(pool, { name: 'AbortError' });

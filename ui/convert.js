@@ -95,27 +95,13 @@ async function compressISOParallel(file, targetFormat, numThreads, onProgress, s
   const isoSize = file.size;
   const totalBlocks = Math.ceil(isoSize / BLOCK_SIZE);
 
-  // Read all blocks from file
-  onProgress(0, 'Reading ISO...');
-  const allBlocks = [];
-  for (let i = 0; i < totalBlocks; i++) {
-    const start = i * BLOCK_SIZE;
-    const end = Math.min(start + BLOCK_SIZE, isoSize);
-    allBlocks.push(await file.slice(start, end).arrayBuffer());
-    if (i % 512 === 0) {
-      if (signal?.aborted) throw createCancelledError();
-      onProgress(i / totalBlocks * 0.2, `Reading block ${i}/${totalBlocks}`);
-    }
-  }
-
-  onProgress(0.2, 'Compressing...');
-
-  const doneMessages = await runWorkerPool(() => new Worker('cso-compress-worker.js'), allBlocks, numThreads, {
+  // Each worker reads its own range of blocks from the file, so the ISO is never held here.
+  onProgress(0, 'Compressing...');
+  const doneMessages = await runWorkerPool(() => new Worker('cso-compress-worker.js'), totalBlocks, numThreads, {
     signal,
-    message: (blocks) => ({ blocks, targetFormat }),
-    transfer: (blocks) => blocks.slice(),
+    message: ({ start, end }) => ({ file, firstBlock: start, endBlock: end, targetFormat }),
     onProgress: (fraction, workerCount) => {
-      onProgress(0.2 + fraction * 0.7, `Compressing... (${workerCount} workers)`);
+      onProgress(fraction * 0.9, `Compressing... (${workerCount} workers)`);
     },
   });
   const rangeResults = doneMessages.map(done => ({

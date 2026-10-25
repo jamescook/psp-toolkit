@@ -582,27 +582,13 @@ async function compressDiscParallel(file, compressionLevel, numThreads, onProgre
   const fileSize = file.size;
   const totalBlocks = Math.ceil(fileSize / ISO_BLOCK_SIZE);
 
-  // Read all blocks from file
-  onProgress(0, 'Reading disc image...');
-  const allBlocks = [];
-  for (let i = 0; i < totalBlocks; i++) {
-    const start = i * ISO_BLOCK_SIZE;
-    const end = Math.min(start + ISO_BLOCK_SIZE, fileSize);
-    allBlocks.push(new Uint8Array(await file.slice(start, end).arrayBuffer()));
-    if (i % 64 === 0) {
-      if (signal?.aborted) throw createCancelledError();
-      onProgress(i / totalBlocks * 0.3, `Reading block ${i}/${totalBlocks}`);
-    }
-  }
-
-  onProgress(0.3, 'Compressing...');
-
-  const doneMessages = await runWorkerPool(() => new Worker('compress-worker.js'), allBlocks, numThreads, {
+  // Each worker reads its own range of blocks from the file, so the disc is never held here.
+  onProgress(0, 'Compressing...');
+  const doneMessages = await runWorkerPool(() => new Worker('compress-worker.js'), totalBlocks, numThreads, {
     signal,
-    message: (blocks) => ({ blocks, compressionLevel }),
-    transfer: (blocks) => blocks.map(b => b.buffer),
+    message: ({ start, end }) => ({ file, firstBlock: start, endBlock: end, compressionLevel }),
     onProgress: (fraction, workerCount) => {
-      onProgress(0.3 + fraction * 0.65, `Compressing... (${workerCount} workers)`);
+      onProgress(fraction * 0.95, `Compressing... (${workerCount} workers)`);
     },
   });
   // Convert transferred ArrayBuffers back to Uint8Arrays

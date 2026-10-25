@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Multi-worker CSO/ZSO and EBOOT compression read the disc in 4 MB batches inside each worker instead of the whole disc up front, 2 KB at a time: a 1.1 GB ISO converts in about 13 seconds instead of nearly 4 minutes, and the disc is never held in memory all at once
+
 ## [0.4.0] - 2026-10-25
 
 ### Added

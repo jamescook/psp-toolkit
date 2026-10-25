@@ -3,7 +3,7 @@
 // Every worker in this app speaks the same protocol: it posts
 // { type: 'progress', ... } any number of times, then one { type: 'done', ... }.
 // A worker that fails either posts { type: 'error', message } or crashes;
-// the compress, cso-compress and zip workers only ever crash.
+// the zip worker only ever crashes.
 //
 // The caller constructs the worker itself, calling new Worker with the file
 // name as a string literal: build.js finds each such call, bundles that file
@@ -109,26 +109,27 @@ async function serveFileRead(port, files, { id, index, start, end }) {
 }
 
 /**
- * Split blocks into up to workerCount contiguous ranges and run each range on
- * its own worker, all at once. Progress messages must carry blockIndex and
- * totalBlocks, as the compression workers' do.
+ * Split blockCount blocks into up to workerCount contiguous ranges and run
+ * each range on its own worker, all at once. Each worker reads its own range
+ * (read-blocks.js), so the page never holds the disc. Progress messages must
+ * carry blockIndex and totalBlocks, as the compression workers' do.
  * @param {function(): Worker} createWorker - must call new Worker with a literal file name
- * @param {Array} blocks
+ * @param {number} blockCount
  * @param {number} workerCount - an upper bound: never more workers than blocks
  * @param {object} options
- * @param {function(Array): *} options.message - the message for one range
- * @param {function(Array): ArrayBuffer[]} [options.transfer] - buffers to move for one range
+ * @param {function({start: number, end: number}): *} options.message - the message
+ *   for blocks [start, end)
  * @param {function(number, number): void} [options.onProgress] - called with the
  *   fraction complete averaged across workers (0–1) and the number of workers
  * @param {AbortSignal} [options.signal] - aborting stops every worker
  * @returns {Promise<object[]>} each worker's 'done' message, in range order.
  *   If one worker fails, the others are stopped.
  */
-function runWorkerPool(createWorker, blocks, workerCount, { message, transfer, onProgress, signal }) {
-  const blocksPerWorker = Math.ceil(blocks.length / workerCount);
+function runWorkerPool(createWorker, blockCount, workerCount, { message, onProgress, signal }) {
+  const blocksPerWorker = Math.ceil(blockCount / workerCount);
   const ranges = [];
-  for (let start = 0; start < blocks.length; start += blocksPerWorker) {
-    ranges.push(blocks.slice(start, start + blocksPerWorker));
+  for (let start = 0; start < blockCount; start += blocksPerWorker) {
+    ranges.push({ start, end: Math.min(start + blocksPerWorker, blockCount) });
   }
 
   const stopAll = new AbortController();
@@ -137,7 +138,6 @@ function runWorkerPool(createWorker, blocks, workerCount, { message, transfer, o
 
   const workerProgress = new Array(ranges.length).fill(0);
   return Promise.all(ranges.map((range, i) => runWorker(createWorker(), message(range), {
-    transfer: transfer?.(range),
     signal: stopAll.signal,
     onProgress: (msg) => {
       workerProgress[i] = msg.blockIndex / msg.totalBlocks;

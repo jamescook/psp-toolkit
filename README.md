@@ -98,6 +98,7 @@ build.js                — Produces dist/index.html (single-file build, workers
   save-worker.js        —   packaging one save as VMP/MCR/GME
   zip-worker.js         —   building download ZIPs
 remote-file.js          — Lets a worker read a dropped file through the page (Safari offline)
+read-blocks.js          — Reads a range of disc blocks in ~4 MB batches, for the parallel compressors
 Dockerfile.test         — Docker image for CI/E2E tests
 playwright.config.js    — Playwright E2E config
 ui/                     — One script per tab, plus shared helpers (plain globals, no modules)
