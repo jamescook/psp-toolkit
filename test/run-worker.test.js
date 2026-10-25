@@ -102,3 +102,69 @@ describe('runWorker', () => {
     await assert.rejects(job, { message: 'Worker error: blob:abc:12 error' });
   });
 });
+
+function loadRunWorkerPool() {
+  const ctx = vm.createContext({ Promise, Error, console: { error() {} } });
+  vm.runInContext(src, ctx);
+  return ctx.runWorkerPool;
+}
+
+/** Starts a pool over `blocks` and returns it with the fake workers it created. */
+function startPool(blocks, workerCount, options = {}) {
+  const runWorkerPool = loadRunWorkerPool();
+  const workers = [];
+  const pool = runWorkerPool(() => {
+    const worker = new FakeWorker();
+    workers.push(worker);
+    return worker;
+  }, blocks, workerCount, { message: (range) => ({ range }), ...options });
+  return { pool, workers };
+}
+
+describe('runWorkerPool', () => {
+  it('gives each worker one contiguous range and returns the results in range order', async () => {
+    const { pool, workers } = startPool(['a', 'b', 'c', 'd', 'e'], 2);
+
+    assert.deepEqual(workers.map(w => w.posted[0].message.range), [['a', 'b', 'c'], ['d', 'e']]);
+    workers[1].reply({ type: 'done', result: 'second' });
+    workers[0].reply({ type: 'done', result: 'first' });
+    assert.deepEqual((await pool).map(done => done.result), ['first', 'second']);
+  });
+
+  it('starts no more workers than there are blocks', async () => {
+    const { pool, workers } = startPool(['a', 'b'], 8);
+
+    assert.equal(workers.length, 2);
+    for (const worker of workers) worker.reply({ type: 'done' });
+    await pool;
+  });
+
+  it('reports progress as the average across workers, with the worker count', async () => {
+    const seen = [];
+    const { pool, workers } = startPool(['a', 'b', 'c', 'd'], 2, {
+      onProgress: (fraction, workerCount) => seen.push([fraction, workerCount]),
+    });
+    workers[0].reply({ type: 'progress', blockIndex: 1, totalBlocks: 2 });
+    workers[1].reply({ type: 'progress', blockIndex: 2, totalBlocks: 2 });
+    for (const worker of workers) worker.reply({ type: 'done' });
+    await pool;
+
+    assert.deepEqual(seen, [[0.25, 2], [0.75, 2]]);
+  });
+
+  it('transfers the buffers chosen for each range', async () => {
+    const { pool, workers } = startPool(['a', 'b'], 2, { transfer: (range) => range.map(x => x + '!') });
+
+    assert.deepEqual(workers.map(w => w.posted[0].transfer), [['a!'], ['b!']]);
+    for (const worker of workers) worker.reply({ type: 'done' });
+    await pool;
+  });
+
+  it('rejects when any worker fails', async () => {
+    const { pool, workers } = startPool(['a', 'b'], 2);
+    workers[0].reply({ type: 'done' });
+    workers[1].reply({ type: 'error', message: 'out of memory' });
+
+    await assert.rejects(pool, { message: 'out of memory' });
+  });
+});

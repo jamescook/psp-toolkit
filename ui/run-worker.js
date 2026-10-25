@@ -44,3 +44,35 @@ function runWorker(worker, message, { transfer = [], onProgress } = {}) {
     worker.postMessage(message, transfer);
   });
 }
+
+/**
+ * Split blocks into up to workerCount contiguous ranges and run each range on
+ * its own worker, all at once. Progress messages must carry blockIndex and
+ * totalBlocks, as the compression workers' do.
+ * @param {function(): Worker} createWorker - must contain the literal new Worker('x.js')
+ * @param {Array} blocks
+ * @param {number} workerCount - an upper bound: never more workers than blocks
+ * @param {object} options
+ * @param {function(Array): *} options.message - the message for one range
+ * @param {function(Array): ArrayBuffer[]} [options.transfer] - buffers to move for one range
+ * @param {function(number, number): void} [options.onProgress] - called with the
+ *   fraction complete averaged across workers (0–1) and the number of workers
+ * @returns {Promise<object[]>} each worker's 'done' message, in range order
+ */
+function runWorkerPool(createWorker, blocks, workerCount, { message, transfer, onProgress }) {
+  const blocksPerWorker = Math.ceil(blocks.length / workerCount);
+  const ranges = [];
+  for (let start = 0; start < blocks.length; start += blocksPerWorker) {
+    ranges.push(blocks.slice(start, start + blocksPerWorker));
+  }
+
+  const workerProgress = new Array(ranges.length).fill(0);
+  return Promise.all(ranges.map((range, i) => runWorker(createWorker(), message(range), {
+    transfer: transfer?.(range),
+    onProgress: (msg) => {
+      workerProgress[i] = msg.blockIndex / msg.totalBlocks;
+      const average = workerProgress.reduce((a, b) => a + b, 0) / ranges.length;
+      onProgress?.(average, ranges.length);
+    },
+  })));
+}

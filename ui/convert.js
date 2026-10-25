@@ -114,35 +114,21 @@ async function compressISOParallel(file, targetFormat, numThreads, onProgress) {
 
   onProgress(0.2, 'Compressing...');
 
-  // Split blocks into ranges for workers
-  const blocksPerWorker = Math.ceil(totalBlocks / numThreads);
-  const ranges = [];
-  for (let i = 0; i < numThreads; i++) {
-    const start = i * blocksPerWorker;
-    const end = Math.min(start + blocksPerWorker, totalBlocks);
-    if (start < totalBlocks) {
-      ranges.push(allBlocks.slice(start, end));
-    }
-  }
-
-  // Spawn workers and distribute work
-  const workerProgress = new Array(ranges.length).fill(0);
-
-  const rangeResults = await Promise.all(ranges.map(async (blocks, r) => {
+  const createWorker = () => {
     const worker = new Worker('cso-compress-worker.js');
     convertActiveWorkers.push(worker);
-    const done = await runWorker(worker, { blocks, targetFormat }, {
-      transfer: blocks.slice(),
-      onProgress: (msg) => {
-        workerProgress[r] = msg.blockIndex / msg.totalBlocks;
-        const avgProgress = workerProgress.reduce((a, b) => a + b, 0) / ranges.length;
-        onProgress(0.2 + avgProgress * 0.7, `Compressing... (${ranges.length} workers)`);
-      },
-    });
-    return {
-      parts: done.parts.map(p => new Uint8Array(p.buffer || p)),
-      uncompressedFlags: done.uncompressedFlags,
-    };
+    return worker;
+  };
+  const doneMessages = await runWorkerPool(createWorker, allBlocks, numThreads, {
+    message: (blocks) => ({ blocks, targetFormat }),
+    transfer: (blocks) => blocks.slice(),
+    onProgress: (fraction, workerCount) => {
+      onProgress(0.2 + fraction * 0.7, `Compressing... (${workerCount} workers)`);
+    },
+  });
+  const rangeResults = doneMessages.map(done => ({
+    parts: done.parts.map(p => new Uint8Array(p.buffer || p)),
+    uncompressedFlags: done.uncompressedFlags,
   }));
 
   convertActiveWorkers = [];

@@ -595,37 +595,23 @@ async function compressDiscParallel(file, compressionLevel, numThreads, onProgre
 
   onProgress(0.3, 'Compressing...');
 
-  // Split blocks into ranges for workers
-  const blocksPerWorker = Math.ceil(totalBlocks / numThreads);
-  const ranges = [];
-  for (let i = 0; i < numThreads; i++) {
-    const start = i * blocksPerWorker;
-    const end = Math.min(start + blocksPerWorker, totalBlocks);
-    if (start < totalBlocks) {
-      ranges.push(allBlocks.slice(start, end));
-    }
-  }
-
-  // Spawn workers and distribute work
-  const workerProgress = new Array(ranges.length).fill(0);
-
-  const workerResults = await Promise.all(ranges.map(async (blocks, r) => {
+  const createWorker = () => {
     const worker = new Worker('compress-worker.js');
     ebootActiveCompressWorkers.push(worker);
-    const done = await runWorker(worker, { blocks, compressionLevel }, {
-      transfer: blocks.map(b => b.buffer),
-      onProgress: (msg) => {
-        workerProgress[r] = msg.blockIndex / msg.totalBlocks;
-        const avgProgress = workerProgress.reduce((a, b) => a + b, 0) / ranges.length;
-        onProgress(0.3 + avgProgress * 0.65, `Compressing... (${numThreads} workers)`);
-      },
-    });
-    // Convert transferred ArrayBuffers back to Uint8Arrays
-    return {
-      parts: done.parts.map(p => new Uint8Array(p.buffer || p)),
-      indexEntries: done.indexEntries,
-      stats: done.stats,
-    };
+    return worker;
+  };
+  const doneMessages = await runWorkerPool(createWorker, allBlocks, numThreads, {
+    message: (blocks) => ({ blocks, compressionLevel }),
+    transfer: (blocks) => blocks.map(b => b.buffer),
+    onProgress: (fraction, workerCount) => {
+      onProgress(0.3 + fraction * 0.65, `Compressing... (${workerCount} workers)`);
+    },
+  });
+  // Convert transferred ArrayBuffers back to Uint8Arrays
+  const workerResults = doneMessages.map(done => ({
+    parts: done.parts.map(p => new Uint8Array(p.buffer || p)),
+    indexEntries: done.indexEntries,
+    stats: done.stats,
   }));
 
   // Stitch results — adjust offsets for ranges after the first
