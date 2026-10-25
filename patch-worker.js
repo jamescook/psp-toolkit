@@ -7,6 +7,7 @@
 //   OUT: { type: 'error', message: string }
 
 import { applyPatch } from './patch/index.js';
+import { receiveFiles } from './remote-file.js';
 
 function progress(pct, label) {
   self.postMessage({ type: 'progress', pct, label });
@@ -14,7 +15,7 @@ function progress(pct, label) {
 
 self.onmessage = async function(e) {
   try {
-    const { rom, patch } = e.data;
+    const { rom, patch } = receiveFiles(e.data);
 
     progress(0, 'Reading disc image...');
     const romBuf = await rom.arrayBuffer();

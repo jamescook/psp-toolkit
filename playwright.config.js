@@ -40,10 +40,17 @@ export default defineConfig({
       deviceScaleFactor: 1,
     } },
     // WebKit is Safari's engine, built by Playwright: it stands in for Safari, not the Safari app.
-    // It loads the page over http, as the website serves it: from file:// WebKit will not let a
-    // worker read a dropped File, so converting, EBOOT builds and patching fail there.
+    // 'webkit' loads the page over http, as the website serves it; 'webkit-file' opens the
+    // offline download from file://, where WebKit will not let a worker read a dropped File
+    // (see remote-file.js). Screenshots are checked once, in 'webkit'.
     { name: 'webkit', use: {
       baseURL: `http://localhost:${DIST_HTTP_PORT}/`,
+      browserName: 'webkit',
+      viewport: { width: 1280, height: 720 },
+      deviceScaleFactor: 1,
+    } },
+    { name: 'webkit-file', ignoreSnapshots: true, use: {
+      baseURL: DIST_FILE_URL,
       browserName: 'webkit',
       viewport: { width: 1280, height: 720 },
       deviceScaleFactor: 1,

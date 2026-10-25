@@ -18,10 +18,11 @@
 // The result Uint8Array is transferred (not copied) to avoid doubling memory.
 
 import { buildEboot } from './eboot/assembler.js';
+import { receiveFiles } from './remote-file.js';
 import { verifyEboot } from './eboot/verify.js';
 
 self.onmessage = async function(e) {
-  const { files, title, discIds, compressionLevel, parentalLevel, region, icon0, pic0, pic1, discInfo, preCompressed } = e.data;
+  const { files, title, discIds, compressionLevel, parentalLevel, region, icon0, pic0, pic1, discInfo, preCompressed } = receiveFiles(e.data);
 
   try {
     const onProgress = (pct, label) => {

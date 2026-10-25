@@ -23,6 +23,7 @@
 // zlib (deflateRaw/inflateRaw) is prepended by build.js banner — no import needed
 
 import { decompressToISO, compressFromISO, transcompress } from './cso/cso.js';
+import { receiveFiles } from './remote-file.js';
 
 function progress(pct, label) {
   self.postMessage({ type: 'progress', pct, label });
@@ -30,7 +31,7 @@ function progress(pct, label) {
 
 // ── Message handler ──────────────────────────────────────────────────────────
 self.onmessage = async function(e) {
-  const { file, sourceFormat, targetFormat } = e.data;
+  const { file, sourceFormat, targetFormat } = receiveFiles(e.data);
   try {
     let result;
     if (targetFormat === 'ISO') {

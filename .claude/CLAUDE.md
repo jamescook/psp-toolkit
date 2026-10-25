@@ -30,7 +30,8 @@ fails if a `new Worker(...)` call takes anything but a literal file name. A new 
 entry in `build.js` only if it uses zlib (`ZLIB_WORKERS`) or `eboot/assets.js` (`BLOB_WORKERS`).
 Name it `*worker.js` at the top level, which `Dockerfile.test` copies by wildcard.
 
-A new top-level source directory needs a `COPY` line in `Dockerfile.test`, and a new UI partial
+A new top-level source directory or module (like `remote-file.js`) needs a `COPY` line in
+`Dockerfile.test`, and a new UI partial
 goes in both `uiPartials` in `build.js` and a `<script>` tag in `app.html`. Miss `Dockerfile.test`
 and every local run passes while CI fails, because CI builds inside that image.
 
@@ -64,10 +65,14 @@ Screenshot baselines exist per browser and per platform (`*-chromium-darwin.png`
 `*-firefox-linux.png`). A change that moves the layout needs both sets updated, and the linux
 set only comes from Docker. Look at a changed baseline before committing it.
 
-Tests open the page as `page.goto('index.html')`. Chromium and Firefox load `dist/` from
-`file://`, like the offline download. WebKit loads it over http from `scripts/serve-dist.js`, like
-the website: from `file://`, WebKit won't let a worker read a dropped file, so converting, EBOOT
-builds and patching fail there. That is a known gap in the offline copy on Safari, not a test bug.
+Tests open the page as `page.goto('index.html')`. Chromium, Firefox and `webkit-file` load `dist/`
+from `file://`, like the offline download; `webkit` loads it over http from
+`scripts/serve-dist.js`, like the website, and is the only WebKit project with screenshots.
+
+From `file://`, WebKit won't let a worker read a dropped File. So a worker never receives one:
+`runWorker` sends a descriptor and serves reads from the page, and the worker calls
+`receiveFiles()` from `remote-file.js`. A new worker that reads a dropped file must do the same,
+or it breaks only in Safari's offline copy — which `webkit-file` catches.
 
 ## Testing strategy — assert behaviour, at the right altitude
 

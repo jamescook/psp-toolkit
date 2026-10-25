@@ -9,7 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const src = fs.readFileSync(path.join(__dirname, '..', 'ui', 'run-worker.js'), 'utf8');
 
 function loadRunWorker(console = { error() {} }) {
-  const ctx = vm.createContext({ Promise, Error, console });
+  const ctx = vm.createContext({ Promise, Error, Blob, MessageChannel, console });
   vm.runInContext(src, ctx);
   return ctx.runWorker;
 }
@@ -104,7 +104,7 @@ describe('runWorker', () => {
 });
 
 function loadRunWorkerPool() {
-  const ctx = vm.createContext({ Promise, Error, console: { error() {} } });
+  const ctx = vm.createContext({ Promise, Error, Blob, MessageChannel, console: { error() {} } });
   vm.runInContext(src, ctx);
   return ctx.runWorkerPool;
 }
