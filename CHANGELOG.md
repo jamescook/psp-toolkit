@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-25
+
+### Added
+
+- Save Manager tab for PS1 memory card saves
+- Extract saves from a DexDrive `.gme` or raw `.mcr`/`.mcd` card to a signed `.VMP` for PSP/Vita
+- Export saves from a PSP/Vita `.VMP` to a raw `.mcr` or a DexDrive `.gme` for PC emulators
+- Several saves at once download as one ZIP, already laid out as `PSP/SAVEDATA/<game>/` for the memory stick
+- Diagnose tab inspects GME, MCR, and VMP cards: lists each save with its product code, and checks a VMP's signature
+- PS1 save format reference in `docs/save-format.md`, crediting apollo-psp and vita-mcr2vmp
+
+### Fixed
+
+- Multi-threaded CSO/ZSO and EBOOT compression, and EBOOT ZIP packaging, show an error instead of hanging when a worker fails
+
+## [0.2.0] - 2026-03-18
+
 ### Added
 
 - Patch tab for applying IPS, PPF, BPS, and xdelta/VCDIFF patches to disc images
@@ -28,10 +45,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Larger fonts, wider layout, and more padding throughout the UI
 - Table row striping and cleaner spacing in diagnose output
-
-### Fixed
-
-- Multi-threaded CSO/ZSO and EBOOT compression, and EBOOT ZIP packaging, show an error instead of hanging when a worker fails
 
 ## [0.1.0] - 2026-03-07
 

@@ -2,8 +2,9 @@
 
 **[jamescook.github.io/psp-toolkit](https://jamescook.github.io/psp-toolkit/)** — use it online, no download needed. Auto-deployed from `main` on every push, so it's always the latest build.
 
-Browser-based tool for converting PSP and PS1 disc images. Everything runs
-client-side — no server, no uploads, your files never leave your machine.
+Browser-based tool for converting and patching PSP and PS1 disc images, and
+converting PS1 saves. Everything runs client-side — no server, no uploads,
+your files never leave your machine.
 
 ## Features
 
@@ -24,6 +25,23 @@ Drop a PS1 disc image (.bin/.iso, with or without .cue) and build a PSP-compatib
 - Custom artwork — click ICON0/PIC0/PIC1 previews to upload your own images, or use auto-generated title art
 - Optional artwork auto-fetch from a community covers database when a disc ID is detected (requires network, off by default)
 - Tested on PSP-3000 with ARK-4 custom firmware
+
+### Patch
+Apply IPS, PPF (v1–v3), BPS, and xdelta/VCDIFF patches to a disc image:
+- Multi-disc sets — drop each disc and its patch; the patched discs download as one ZIP
+- Checks what the format allows: PPF block check, BPS source/target CRC32s
+
+### Save Manager
+Convert PS1 memory card saves between PC emulators and PSP/Vita:
+- DexDrive `.gme` or raw `.mcr`/`.mcd` card → signed `.VMP` for PSP/Vita
+- PSP/Vita `.VMP` → raw `.mcr` or DexDrive `.gme`
+- Pick saves from the card; several at once download as a ZIP already laid out as `PSP/SAVEDATA/<game>/`
+
+### Diagnose
+Drop any file to see what it is: EBOOT.PBP (header, PARAM.SFO, PSAR), CSO/ZSO,
+BIN/ISO, CUE, every patch format above, and GME/MCR/VMP memory cards (each
+save's product code, and whether a VMP's signature is valid). Unknown files
+get a hex dump.
 
 ## Usage
 
@@ -63,38 +81,36 @@ npm run test:e2e:update     # Update screenshot baselines
 ```
 app.html                — Main HTML shell
 style.css               — Dark theme styles
-build.js                — Produces dist/index.html (single-file build)
-worker.js               — Web Worker for CSO/ZSO/ISO conversion
-cso-compress-worker.js  — Web Worker for parallel CSO/ZSO compression
-eboot-worker.js         — Web Worker for EBOOT.PBP construction
-compress-worker.js      — Web Worker for parallel EBOOT compression
+build.js                — Produces dist/index.html (single-file build, workers inlined)
+*worker.js              — Web Workers, one per kind of job:
+  worker.js             —   CSO/ZSO/ISO conversion
+  cso-compress-worker.js —  parallel CSO/ZSO compression
+  eboot-worker.js       —   EBOOT.PBP construction
+  compress-worker.js    —   parallel EBOOT compression
+  patch-worker.js       —   applying patches
+  save-worker.js        —   packaging one save as VMP/MCR/GME
+  zip-worker.js         —   building download ZIPs
 Dockerfile.test         — Docker image for CI/E2E tests
 playwright.config.js    — Playwright E2E config
-ui/
-  artwork.js            — EBOOT artwork generation (ICON0/PIC0/PIC1)
-  shared.js             — Shared utilities, disc detection, CUE parsing
-  convert.js            — CSO/ZSO/ISO conversion UI
-  eboot-ui.js           — EBOOT builder UI
-  diagnose.js           — EBOOT diagnostic/inspection UI
-eboot/
-  assembler.js          — Orchestrates PBP construction
-  pbp.js                — PBP container header writer
-  sfo.js                — PARAM.SFO builder
-  psisoimg.js           — Single-disc PSAR compression
-  pstitleimg.js         — Multi-disc PSAR wrapper
-  toc.js                — CD table of contents generator
-  cue.js                — CUE sheet parser
-  discid.js             — Disc ID auto-detection from ISO9660
-  assets.js             — Static firmware blobs (DATA.PSP ELF, STARTDAT)
-vendor/
-  zlib.cjs              — deflateRaw + inflateRaw (pako 2.1.0, bundled by esbuild)
-test/
-  e2e/convert.spec.js   — Playwright E2E tests for convert tab
-  fixtures/test.iso     — Shared synthetic ISO fixture (64KB)
-scripts/
-  generate-e2e-fixture.js   — Generates test/fixtures/test.iso
-tools/
-  inspect-eboot.js      — EBOOT structural inspector
+ui/                     — One script per tab, plus shared helpers (plain globals, no modules)
+  run-worker.js         — Runs a job on a worker, or across a pool of them
+  shared.js             — Shared utilities, disc detection, CUE parsing, tab switching
+  convert.js            — Convert tab
+  eboot-ui.js           — EBOOT tab
+  artwork.js            — Default EBOOT artwork (ICON0/PIC0/PIC1)
+  artwork-fetch.js      — Opt-in cover fetch by disc ID
+  diagnose.js           — Diagnose tab
+  patch.js              — Patch tab
+  save-manager.js       — Save Manager tab
+cso/                    — CSO/ZSO header and conversion, LZ4
+eboot/                  — EBOOT.PBP construction (PBP, PARAM.SFO, PSAR, TOC, CUE, disc ID)
+patch/                  — IPS, PPF, BPS, and VCDIFF/xdelta (with XZ/LZMA2/LZMA decoders)
+save/                   — PS1 memory card (MCR) parser, GME container, VMP writer, AES-128
+vendor/                 — pako 2.1.0 (deflateRaw/inflateRaw), xdelta3
+docs/                   — Format references: eboot-format.md, save-format.md
+test/                   — Unit tests (node:test); e2e/ holds the Playwright tests per tab
+scripts/                — Fixture generators, the Docker test runner, the VMP oracle check
+tools/                  — Debugging: inspect-eboot.js, debug-vcdiff.js
 ```
 
 ## Prior Art
