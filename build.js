@@ -124,16 +124,29 @@ const uiPartials = [
 ];
 const uiCode = uiPartials.map(read).join('\n');
 
-// Bundle all workers with esbuild
-const [csoWorkerCode, ebootWorkerCode, compressWorkerCode, csoCompressWorkerCode, patchWorkerCode, zipWorkerCode, saveWorkerCode] = await Promise.all([
-  bundleWorker('worker.js', zlib, []),
-  bundleWorker('eboot-worker.js', zlib, [inlineBlobsPlugin]),
-  bundleWorker('compress-worker.js', zlib, [inlineBlobsPlugin]),
-  bundleWorker('cso-compress-worker.js', zlib, []),
-  bundleWorker('patch-worker.js', '', []),
-  bundleWorker('zip-worker.js', '', []),
-  bundleWorker('save-worker.js', '', []),
-]);
+// The workers are whatever the UI starts: each literal new Worker('x.js') names
+// one. A new worker needs no entry here unless it uses zlib or the .bin blobs.
+const WORKER_CALL = /new Worker\('([\w.-]+\.js)'\)/g;
+const workerFiles = [...new Set(Array.from(uiCode.matchAll(WORKER_CALL), m => m[1]))];
+const workerCallCount = uiCode.split('new Worker(').length - 1;
+if (workerCallCount !== Array.from(uiCode.matchAll(WORKER_CALL)).length) {
+  throw new Error("build.js: every new Worker(...) in ui/ must take a literal file name, as new Worker('x.js')");
+}
+
+// Workers that need zlib's deflateRaw/inflateRaw globals, directly or through
+// a module they import, and those that load eboot/assets.js.
+const ZLIB_WORKERS = new Set(['worker.js', 'eboot-worker.js', 'compress-worker.js', 'cso-compress-worker.js']);
+const BLOB_WORKERS = new Set(['eboot-worker.js', 'compress-worker.js']);
+
+const workers = await Promise.all(workerFiles.map(async (file, i) => ({
+  file,
+  global: `__WORKER_${i}`,
+  code: await bundleWorker(
+    file,
+    ZLIB_WORKERS.has(file) ? zlib : '',
+    BLOB_WORKERS.has(file) ? [inlineBlobsPlugin] : [],
+  ),
+})));
 
 // ── 1. Inline CSS (at the __STYLES__ marker) ─────────────────────────────────
 
@@ -142,13 +155,7 @@ html = replaceLiteral(html, '<!-- __STYLES__ -->', '<style>\n' + css + '\n</styl
 // ── 2. Inject worker code as globals (at the __WORKERS__ marker) ─────────────
 
 const workerScript = '<script>\n' +
-  'const __CSO_WORKER = `' + escapeForTemplateLiteral(csoWorkerCode) + '`;\n' +
-  'const __EBOOT_WORKER = `' + escapeForTemplateLiteral(ebootWorkerCode) + '`;\n' +
-  'const __COMPRESS_WORKER = `' + escapeForTemplateLiteral(compressWorkerCode) + '`;\n' +
-  'const __CSO_COMPRESS_WORKER = `' + escapeForTemplateLiteral(csoCompressWorkerCode) + '`;\n' +
-  'const __PATCH_WORKER = `' + escapeForTemplateLiteral(patchWorkerCode) + '`;\n' +
-  'const __ZIP_WORKER = `' + escapeForTemplateLiteral(zipWorkerCode) + '`;\n' +
-  'const __SAVE_WORKER = `' + escapeForTemplateLiteral(saveWorkerCode) + '`;\n' +
+  workers.map(w => `const ${w.global} = \`${escapeForTemplateLiteral(w.code)}\`;\n`).join('') +
   '</script>';
 
 html = replaceLiteral(html, '<!-- __WORKERS__ -->', workerScript);
@@ -165,21 +172,9 @@ html = html.slice(0, scriptsStart) + scriptsBlock + '\n' + html.slice(scriptsEnd
 
 // ── 4. Replace new Worker(...) calls with blob URLs ──────────────────────────
 
-const workerReplacements = [
-  ["new Worker('worker.js')", '__CSO_WORKER'],
-  ["new Worker('eboot-worker.js')", '__EBOOT_WORKER'],
-  ["new Worker('compress-worker.js')", '__COMPRESS_WORKER'],
-  ["new Worker('cso-compress-worker.js')", '__CSO_COMPRESS_WORKER'],
-  ["new Worker('patch-worker.js')", '__PATCH_WORKER'],
-  ["new Worker('zip-worker.js')", '__ZIP_WORKER'],
-  ["new Worker('save-worker.js')", '__SAVE_WORKER'],
-];
-
-for (const [original, global] of workerReplacements) {
+for (const { file, global } of workers) {
   const blobExpr = `new Worker(URL.createObjectURL(new Blob([${global}], {type:'text/javascript'})))`;
-  const before = html;
-  html = html.replaceAll(original, blobExpr);
-  if (html === before) throw new Error(`build.js: Worker string not found: ${original}`);
+  html = html.replaceAll(`new Worker('${file}')`, blobExpr);
 }
 
 // ── 5. Write output ──────────────────────────────────────────────────────────

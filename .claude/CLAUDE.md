@@ -22,13 +22,17 @@ never hardcode a path on one machine.
 
 ## How the build fits together
 
-`build.js` bundles each `*-worker.js` with esbuild and inlines them, the UI partials in `ui/` and
-`style.css` into `app.html` at its `__WORKERS__`, `__SCRIPTS__` and `__STYLES__` markers.
+`build.js` inlines the UI partials in `ui/`, `style.css` and every worker into `app.html` at its
+`__SCRIPTS__`, `__STYLES__` and `__WORKERS__` markers.
 
-Adding a worker touches `build.js` in three spots (the `bundleWorker` list, the `__*_WORKER`
-global, and the `new Worker('…')` replacement table) and the `COPY` lines in `Dockerfile.test`. A
-new top-level source directory needs a `COPY` line too. Miss `Dockerfile.test` and every local
-run passes while CI fails, because CI builds inside that image.
+The build finds the workers itself: each `new Worker('x.js')` in `ui/` names one, and the build
+fails if a `new Worker(...)` call takes anything but a literal file name. A new worker needs an
+entry in `build.js` only if it uses zlib (`ZLIB_WORKERS`) or `eboot/assets.js` (`BLOB_WORKERS`).
+Name it `*worker.js` at the top level, which `Dockerfile.test` copies by wildcard.
+
+A new top-level source directory needs a `COPY` line in `Dockerfile.test`, and a new UI partial
+goes in both `uiPartials` in `build.js` and a `<script>` tag in `app.html`. Miss `Dockerfile.test`
+and every local run passes while CI fails, because CI builds inside that image.
 
 Heavy work (compression, hashing, patching) runs in a Web Worker. Files can be over 1 GB: stream
 or work in blocks, never hold a whole disc image in one buffer twice.

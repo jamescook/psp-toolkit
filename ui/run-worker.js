@@ -5,8 +5,9 @@
 // A worker that fails either posts { type: 'error', message } or crashes;
 // the compress, cso-compress and zip workers only ever crash.
 //
-// The caller constructs the worker itself, as a literal new Worker('x.js'):
-// build.js finds that exact text and swaps in the inlined worker code.
+// The caller constructs the worker itself, calling new Worker with the file
+// name as a string literal: build.js finds each such call, bundles that file
+// and swaps in the inlined code.
 
 /**
  * Post a message to a worker and settle when it finishes. The worker is
@@ -49,7 +50,7 @@ function runWorker(worker, message, { transfer = [], onProgress } = {}) {
  * Split blocks into up to workerCount contiguous ranges and run each range on
  * its own worker, all at once. Progress messages must carry blockIndex and
  * totalBlocks, as the compression workers' do.
- * @param {function(): Worker} createWorker - must contain the literal new Worker('x.js')
+ * @param {function(): Worker} createWorker - must call new Worker with a literal file name
  * @param {Array} blocks
  * @param {number} workerCount - an upper bound: never more workers than blocks
  * @param {object} options
