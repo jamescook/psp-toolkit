@@ -4,15 +4,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const DIST_HTML = path.join(ROOT, 'dist', 'index.html');
 const FIXTURES = path.join(ROOT, 'test', 'fixtures');
 
-function fileUrl(p) {
-  return 'file://' + p;
-}
-
 test.beforeEach(async ({ page }) => {
-  await page.goto(fileUrl(DIST_HTML));
+  await page.goto('index.html');
   await page.addStyleTag({ content: '*, *::before, *::after { transition: none !important; animation: none !important; }' });
   // Switch to Diagnose tab
   await page.locator('.tab-btn[data-tab="diagnose"]').click();

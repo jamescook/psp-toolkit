@@ -6,17 +6,12 @@ import { parseMcr, MCR_SIZE } from '../../save/mcr.js';
 import { stripGmeHeader, GME_HEADER_SIZE } from '../../save/gme.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const DIST_HTML = path.join(ROOT, 'dist', 'index.html');
 const FIXTURES = path.join(ROOT, 'test', 'fixtures');
 const SAVE_GME = path.join(FIXTURES, 'save-test.gme');
 const SAVE_VMP = path.join(FIXTURES, 'save-test.vmp');
 
 const VMP_SIZE = 0x20080;
 const VMP_HEADER_BYTES = [0x00, 0x50, 0x4d, 0x56, 0x80];
-
-function fileUrl(p) {
-  return 'file://' + p;
-}
 
 /** Minimal ZIP reader (stored/uncompressed entries), matching patch.spec.js's approach. */
 function readZipEntries(zipBytes) {
@@ -42,7 +37,7 @@ function expectVmpBytes(bytes) {
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.goto(fileUrl(DIST_HTML));
+  await page.goto('index.html');
   await page.addStyleTag({ content: '*, *::before, *::after { transition: none !important; animation: none !important; }' });
   await page.locator('.tab-btn[data-tab="save"]').click();
 });

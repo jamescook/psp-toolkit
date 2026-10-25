@@ -54,7 +54,7 @@ The operator reads each command before allowing it, and the permission list matc
 
 ```sh
 npm test                       # unit tests, node:test, test/*.test.js
-npm run test:e2e               # Playwright, Chromium + Firefox, this machine's baselines
+npm run test:e2e               # Playwright, Chromium + Firefox + WebKit, this machine's baselines
 npm run test:e2e:docker        # the same suite inside Dockerfile.test — what CI runs
 npm run test:e2e:update        # rewrite this machine's (darwin) screenshot baselines
 npm run test:e2e:update:docker # rewrite the linux baselines CI compares against
@@ -63,6 +63,11 @@ npm run test:e2e:update:docker # rewrite the linux baselines CI compares against
 Screenshot baselines exist per browser and per platform (`*-chromium-darwin.png`,
 `*-firefox-linux.png`). A change that moves the layout needs both sets updated, and the linux
 set only comes from Docker. Look at a changed baseline before committing it.
+
+Tests open the page as `page.goto('index.html')`. Chromium and Firefox load `dist/` from
+`file://`, like the offline download. WebKit loads it over http from `scripts/serve-dist.js`, like
+the website: from `file://`, WebKit won't let a worker read a dropped file, so converting, EBOOT
+builds and patching fail there. That is a known gap in the offline copy on Safari, not a test bug.
 
 ## Testing strategy — assert behaviour, at the right altitude
 

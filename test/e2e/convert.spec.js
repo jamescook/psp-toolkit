@@ -5,7 +5,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const DIST_HTML = path.join(ROOT, 'dist', 'index.html');
 const FIXTURE_ISO = path.join(ROOT, 'test', 'fixtures', 'test.iso');
 
 function md5(data) {
@@ -18,10 +17,6 @@ const EXPECTED = {
   cso:        'c1b78fef172850010932ff07842fdb73',
   zso:        '85fe38a650109e0f2cbd4d578237ed3c',
 };
-
-function fileUrl(p) {
-  return 'file://' + p;
-}
 
 async function loadFile(page, filePath) {
   const input = page.locator('[data-testid="convert-file-input"]');
@@ -39,7 +34,7 @@ async function convertAndDownload(page, format) {
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.goto(fileUrl(DIST_HTML));
+  await page.goto('index.html');
   // Kill all CSS transitions/animations so screenshots capture final state
   await page.addStyleTag({ content: '*, *::before, *::after { transition: none !important; animation: none !important; }' });
   // Stub performance.now() so elapsed time is always "0.1s" (deterministic screenshots)

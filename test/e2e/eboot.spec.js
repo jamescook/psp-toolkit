@@ -4,7 +4,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const DIST_HTML = path.join(ROOT, 'dist', 'index.html');
 const FIXTURES = path.join(ROOT, 'test', 'fixtures');
 
 /** Wait for all artwork preview images to finish loading (if they have a src). */
@@ -19,12 +18,8 @@ async function waitForArtwork(page) {
   });
 }
 
-function fileUrl(p) {
-  return 'file://' + p;
-}
-
 test.beforeEach(async ({ page }) => {
-  await page.goto(fileUrl(DIST_HTML));
+  await page.goto('index.html');
   await page.addStyleTag({ content: '*, *::before, *::after { transition: none !important; animation: none !important; }' });
   await page.evaluate(() => {
     let t = 0;

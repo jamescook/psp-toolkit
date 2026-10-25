@@ -61,7 +61,7 @@ open dist/index.html
 
 ```sh
 npm test                    # Unit tests (node:test)
-npm run test:e2e            # Playwright E2E tests (local Chromium + Firefox)
+npm run test:e2e            # Playwright E2E tests (local Chromium, Firefox, WebKit)
 npm run test:e2e:docker     # E2E tests in Docker (matches CI)
 npm run test:e2e:update     # Update screenshot baselines
 ```
