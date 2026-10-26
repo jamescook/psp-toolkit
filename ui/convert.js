@@ -33,7 +33,7 @@ convertDropZone.addEventListener('dragleave', () => convertDropZone.classList.re
 convertDropZone.addEventListener('drop', e => {
   e.preventDefault();
   convertDropZone.classList.remove('dragover');
-  if (e.dataTransfer.files.length) handleConvertDrop(e.dataTransfer.files);
+  collectDroppedFiles(e.dataTransfer, convertFileInput.accept).then(files => { if (files.length) handleConvertDrop(files); });
 });
 convertFileInput.addEventListener('change', () => {
   if (convertFileInput.files.length) handleConvertDrop(convertFileInput.files);

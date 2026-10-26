@@ -114,6 +114,7 @@ let html = read('app.html');
 const uiPartials = [
   'ui/artwork.js',
   'ui/run-worker.js',
+  'ui/drop-files.js',
   'ui/shared.js',
   'ui/save-output.js',
   'ui/job-queue.js',

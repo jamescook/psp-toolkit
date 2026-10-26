@@ -39,7 +39,7 @@ patchDropZone.addEventListener('dragleave', () => patchDropZone.classList.remove
 patchDropZone.addEventListener('drop', e => {
   e.preventDefault();
   patchDropZone.classList.remove('dragover');
-  if (e.dataTransfer.files.length) handlePatchDrop(e.dataTransfer.files);
+  collectDroppedFiles(e.dataTransfer, patchFileInput.accept).then(files => { if (files.length) handlePatchDrop(files); });
 });
 patchFileInput.addEventListener('change', () => {
   if (patchFileInput.files.length) handlePatchDrop(patchFileInput.files);

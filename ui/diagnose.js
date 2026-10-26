@@ -30,7 +30,7 @@ diagnoseDropZone.addEventListener('dragleave', () => diagnoseDropZone.classList.
 diagnoseDropZone.addEventListener('drop', e => {
   e.preventDefault();
   diagnoseDropZone.classList.remove('dragover');
-  if (e.dataTransfer.files.length) handleDiagnoseDrop(e.dataTransfer.files);
+  collectDroppedFiles(e.dataTransfer, diagnoseFileInput.accept).then(files => { if (files.length) handleDiagnoseDrop(files); });
 });
 diagnoseFileInput.addEventListener('change', () => {
   if (diagnoseFileInput.files.length) handleDiagnoseDrop(diagnoseFileInput.files);

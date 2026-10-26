@@ -127,7 +127,7 @@ saveDropZone.addEventListener('dragleave', () => saveDropZone.classList.remove('
 saveDropZone.addEventListener('drop', e => {
   e.preventDefault();
   saveDropZone.classList.remove('dragover');
-  if (e.dataTransfer.files.length) handleSaveDrop(e.dataTransfer.files[0]);
+  collectDroppedFiles(e.dataTransfer, saveFileInput.accept).then(files => { if (files.length) handleSaveDrop(files[0]); });
 });
 saveFileInput.addEventListener('change', () => {
   if (saveFileInput.files.length) handleSaveDrop(saveFileInput.files[0]);

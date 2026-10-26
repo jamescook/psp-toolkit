@@ -130,7 +130,7 @@ ebootDropZone.addEventListener('dragleave', () => ebootDropZone.classList.remove
 ebootDropZone.addEventListener('drop', e => {
   e.preventDefault();
   ebootDropZone.classList.remove('dragover');
-  if (e.dataTransfer.files.length) handleEbootDrop(e.dataTransfer.files);
+  collectDroppedFiles(e.dataTransfer, ebootFileInput.accept).then(files => { if (files.length) handleEbootDrop(files); });
 });
 ebootFileInput.addEventListener('change', () => {
   if (ebootFileInput.files.length) handleEbootDrop(ebootFileInput.files);

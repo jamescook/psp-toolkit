@@ -149,6 +149,20 @@ test('Round-trip ISO → ZSO → ISO: byte-identical', async ({ page }) => {
   }
 });
 
+test('a disc dropped onto the drop area loads, as one chosen with the file picker does', async ({ page }) => {
+  const iso = fs.readFileSync(FIXTURE_ISO).toString('base64');
+  const dataTransfer = await page.evaluateHandle((b64) => {
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const dt = new DataTransfer();
+    dt.items.add(new File([bytes], 'dropped.iso'));
+    return dt;
+  }, iso);
+  await page.locator('[data-testid="convert-drop-zone"]').dispatchEvent('drop', { dataTransfer });
+
+  await expect(page.locator('#convertFileName')).toHaveText('dropped.iso');
+  await expect(page.locator('[data-testid="convert-to-cso"]')).toBeVisible();
+});
+
 test('Workers slider: visible for ISO, hidden for CSO/ZSO', async ({ page }) => {
   const opts = page.locator('[data-testid="convert-opts"]');
 
