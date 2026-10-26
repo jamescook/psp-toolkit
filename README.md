@@ -6,6 +6,8 @@ Browser-based tool for converting and patching PSP and PS1 disc images, and
 converting PS1 saves. Everything runs client-side — no server, no uploads,
 your files never leave your machine.
 
+<p align="center"><img src="docs/demo.gif" width="390" alt="On a phone: a PSP ISO dropped on Convert and a PS1 game folder dropped on EBOOT, both run one after another in the queue"></p>
+
 ## Features
 
 ### CSO / ZSO / ISO Conversion
