@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Dropping a game's folder onto a tab reads the discs inside it; other files in the folder, such as a readme, are skipped
+
+### Fixed
+
+- On phones the tab row no longer runs off the side of the screen: each tab's icon sits above its name
+
 ## [0.4.1] - 2026-10-25
 
 ### Changed

@@ -542,11 +542,19 @@ input[type="file"] { display: none; }
     min-width: 0;
     gap: 0.3rem;
   }
+  /* Five icon-and-name tabs side by side need ~555px: stack each icon over
+     its name and let the names wrap, so the row fits a phone. */
   .tab-btn {
-    flex: 1;
+    flex: 1 1 0;
+    min-width: 0;
+    flex-direction: column;
     justify-content: center;
-    padding: 0.5rem 0.4rem;
-    font-size: var(--font-sm);
+    gap: 0.15rem;
+    padding: 0.45rem 0.2rem;
+    font-size: var(--font-xs);
+    line-height: 1.15;
+    text-align: center;
+    white-space: normal;
   }
 }
 
